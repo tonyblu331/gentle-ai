@@ -8,14 +8,28 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
 	"github.com/gentleman-programming/gentle-ai/internal/backup"
-	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
+	"github.com/gentleman-programming/gentle-ai/internal/testutil"
 	"github.com/gentleman-programming/gentle-ai/internal/update"
 )
+
+// isolateExecutorEnv scopes HOME / USERPROFILE / APPDATA to home on Windows so
+// agents.ConfigRootsForBackup (used by configPathsForBackup and upgrade snapshots)
+// does not traverse the host profile (e.g. real %APPDATA%\kiro\User).
+func isolateExecutorEnv(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+		t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+		t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	}
+}
 
 // --- helpers ---
 
@@ -81,7 +95,7 @@ func TestExecute_DevBuildOnlyNoBackupCreated(t *testing.T) {
 	execCalled := false
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		execCalled = true
-		return testExecEcho("should not be called")
+		return testutil.StubEcho("should not be called")
 	}
 
 	results := []update.UpdateResult{
@@ -146,6 +160,8 @@ func TestExecute_RegisteredNotMaterializedIsExecutable(t *testing.T) {
 	})
 
 	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+
 	opencodeDir := filepath.Join(home, ".config", "opencode")
 	if err := os.MkdirAll(opencodeDir, 0o755); err != nil {
 		t.Fatal(err)
@@ -166,7 +182,7 @@ func TestExecute_RegisteredNotMaterializedIsExecutable(t *testing.T) {
 	execCalled := false
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		execCalled = true
-		return testExecNoop()
+		return testutil.StubOK()
 	}
 
 	result := makeResult("opencode-sdd-engram-manage", update.RegisteredNotMaterialized, "", "1.2.0", update.InstallOpenCodePlugin)
@@ -223,7 +239,7 @@ func TestExecute_BackupBeforeExecution(t *testing.T) {
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		calls = append(calls, name)
 		// Return a real passing command (echo) so exec succeeds.
-		return testExecEcho("ok")
+		return testutil.StubEcho("ok")
 	}
 
 	results := []update.UpdateResult{
@@ -231,7 +247,9 @@ func TestExecute_BackupBeforeExecution(t *testing.T) {
 	}
 	results[0].Tool.GoImportPath = "github.com/Gentleman-Programming/engram/cmd/engram"
 
-	report := Execute(context.Background(), results, linuxProfile(), t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, linuxProfile(), home, false)
 
 	// BackupID must be non-empty.
 	if report.BackupID == "" {
@@ -248,10 +266,11 @@ func TestExecuteProgressDoesNotIncludeBackupExclusionDiagnostics(t *testing.T) {
 	origExecCommand := execCommand
 	t.Cleanup(func() { execCommand = origExecCommand })
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecEcho("ok")
+		return testutil.StubEcho("ok")
 	}
 
 	home := t.TempDir()
+	isolateExecutorEnv(t, home)
 	configFile := filepath.Join(home, ".claude", "CLAUDE.md")
 	excludedFile := filepath.Join(home, ".claude", "projects", "session.json")
 	for _, f := range []string{configFile, excludedFile} {
@@ -294,7 +313,7 @@ func TestExecute_DryRunNeverExecs(t *testing.T) {
 	called := false
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		called = true
-		return testExecEcho("should not run")
+		return testutil.StubEcho("should not run")
 	}
 
 	results := []update.UpdateResult{
@@ -333,10 +352,10 @@ func TestExecute_PerToolSuccessAndFailure(t *testing.T) {
 		// engram go install succeeds, gga curl/download attempt fails — we simulate
 		// the failure by having execCommand return false for "gga" detection.
 		if name == "go" {
-			return testExecEcho("go install ok")
+			return testutil.StubEcho("go install ok")
 		}
 		// Any other exec attempt fails.
-		return testExecFail()
+		return testutil.StubExit1()
 	}
 
 	results := []update.UpdateResult{
@@ -344,7 +363,9 @@ func TestExecute_PerToolSuccessAndFailure(t *testing.T) {
 	}
 	results[0].Tool.GoImportPath = "github.com/Gentleman-Programming/engram/cmd/engram"
 
-	report := Execute(context.Background(), results, linuxProfile(), t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, linuxProfile(), home, false)
 
 	if len(report.Results) != 1 {
 		t.Fatalf("len(Results) = %d, want 1", len(report.Results))
@@ -366,7 +387,7 @@ func TestExecute_DevBuildIsSkipped(t *testing.T) {
 	origExecCommand := execCommand
 	t.Cleanup(func() { execCommand = origExecCommand })
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecEcho("ok")
+		return testutil.StubEcho("ok")
 	}
 
 	results := []update.UpdateResult{
@@ -375,7 +396,9 @@ func TestExecute_DevBuildIsSkipped(t *testing.T) {
 	}
 	results[1].Tool.GoImportPath = "github.com/Gentleman-Programming/engram/cmd/engram"
 
-	report := Execute(context.Background(), results, linuxProfile(), t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, linuxProfile(), home, false)
 
 	// gentle-ai (DevBuild) MUST appear as UpgradeSkipped with a ManualHint.
 	var devResult *ToolUpgradeResult
@@ -420,7 +443,7 @@ func TestExecute_FailureDoesNotImplyConfigLoss(t *testing.T) {
 
 	// Force all exec to fail.
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecFail()
+		return testutil.StubExit1()
 	}
 
 	results := []update.UpdateResult{
@@ -428,7 +451,9 @@ func TestExecute_FailureDoesNotImplyConfigLoss(t *testing.T) {
 	}
 	results[0].Tool.GoImportPath = "github.com/Gentleman-Programming/engram/cmd/engram"
 
-	report := Execute(context.Background(), results, linuxProfile(), t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, linuxProfile(), home, false)
 
 	// Even with failure, BackupID must be set (backup happened before exec).
 	if report.BackupID == "" {
@@ -462,7 +487,7 @@ func TestExecute_DevBuildSurfacedAsSkipped(t *testing.T) {
 	origExecCommand := execCommand
 	t.Cleanup(func() { execCommand = origExecCommand })
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecEcho("ok")
+		return testutil.StubEcho("ok")
 	}
 
 	results := []update.UpdateResult{
@@ -471,7 +496,9 @@ func TestExecute_DevBuildSurfacedAsSkipped(t *testing.T) {
 	}
 	results[1].Tool.GoImportPath = "github.com/Gentleman-Programming/engram/cmd/engram"
 
-	report := Execute(context.Background(), results, linuxProfile(), t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, linuxProfile(), home, false)
 
 	// gentle-ai (DevBuild) MUST appear in results as UpgradeSkipped.
 	var devResult *ToolUpgradeResult
@@ -522,7 +549,7 @@ func TestExecute_ManualFallbackSurfacedAsSkippedNotFailed(t *testing.T) {
 	execCalled := false
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		execCalled = true
-		return testExecEcho("should not be called")
+		return testutil.StubEcho("should not be called")
 	}
 
 	// Windows profile → binaryUpgrade returns a manual fallback error.
@@ -533,7 +560,9 @@ func TestExecute_ManualFallbackSurfacedAsSkippedNotFailed(t *testing.T) {
 	}
 	results[0].UpdateHint = "See https://github.com/Gentleman-Programming/gentle-ai/releases"
 
-	report := Execute(context.Background(), results, windowsProfile, t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, windowsProfile, home, false)
 
 	if execCalled {
 		t.Errorf("execCommand should not be called for Windows binary manual fallback")
@@ -569,6 +598,7 @@ func TestExecute_ManualFallbackSurfacedAsSkippedNotFailed(t *testing.T) {
 // and diff the contents before and after.
 func TestExecute_ConfigNotMutatedDuringUpgrade(t *testing.T) {
 	homeDir := t.TempDir()
+	isolateExecutorEnv(t, homeDir)
 
 	// Create realistic config files with known contents.
 	configFiles := map[string]string{
@@ -591,7 +621,7 @@ func TestExecute_ConfigNotMutatedDuringUpgrade(t *testing.T) {
 	t.Cleanup(func() { execCommand = origExecCommand })
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		// Simulate a successful upgrade (no-op shell command).
-		return testExecEcho("upgrade ok")
+		return testutil.StubEcho("upgrade ok")
 	}
 
 	results := []update.UpdateResult{
@@ -646,6 +676,7 @@ func TestToolUpgradeResult_ErrorWrapping(t *testing.T) {
 // This tests the G5 gap fix: computed paths aligned with ScanConfigs directories.
 func TestConfigPathsForBackup_CoversAgentDirectories(t *testing.T) {
 	homeDir := t.TempDir()
+	isolateExecutorEnv(t, homeDir)
 
 	// Create files in each agent config directory to verify they are discovered.
 	agentFiles := map[string]string{
@@ -688,6 +719,7 @@ func TestConfigPathsForBackup_CoversAgentDirectories(t *testing.T) {
 // It must NOT panic or error out — missing dirs simply contribute no paths.
 func TestConfigPathsForBackup_HandlesEmptyDirs(t *testing.T) {
 	homeDir := t.TempDir()
+	isolateExecutorEnv(t, homeDir)
 	// No agent config directories exist in this temp dir.
 
 	paths := configPathsForBackup(homeDir)
@@ -719,7 +751,7 @@ func TestExecute_ForcedSnapshotFailureSurfacesWarningEndToEnd(t *testing.T) {
 
 	// Stub exec so the upgrade itself succeeds (we're only testing the backup path).
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecEcho("upgrade ok")
+		return testutil.StubEcho("upgrade ok")
 	}
 
 	// Force snapshot creation to fail.
@@ -732,7 +764,9 @@ func TestExecute_ForcedSnapshotFailureSurfacesWarningEndToEnd(t *testing.T) {
 	}
 	results[0].Tool.GoImportPath = "github.com/Gentleman-Programming/engram/cmd/engram"
 
-	report := Execute(context.Background(), results, linuxProfile(), t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, linuxProfile(), home, false)
 
 	// BackupID must be empty — the snapshot failed.
 	if report.BackupID != "" {
@@ -775,10 +809,6 @@ func TestExecute_ForcedSnapshotFailureSurfacesWarningEndToEnd(t *testing.T) {
 // This closes the verify gap: "no runtime test proves upgrade manifests are
 // emitted with metadata". This test reads the manifest from disk directly.
 func TestExecute_UpgradeBackupManifestHasUpgradeMetadata(t *testing.T) {
-	origDataDir := os.Getenv(engram.DataDirEnvVar)
-	t.Cleanup(func() { _ = os.Setenv(engram.DataDirEnvVar, origDataDir) })
-	_ = os.Unsetenv(engram.DataDirEnvVar)
-
 	origExecCommand := execCommand
 	origAppVersion := AppVersion
 	t.Cleanup(func() {
@@ -786,11 +816,12 @@ func TestExecute_UpgradeBackupManifestHasUpgradeMetadata(t *testing.T) {
 		AppVersion = origAppVersion
 	})
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecEcho("ok")
+		return testutil.StubEcho("ok")
 	}
 	AppVersion = "3.0.0"
 
 	homeDir := t.TempDir()
+	isolateExecutorEnv(t, homeDir)
 	// Create a config file so the snapshot captures at least one file.
 	configFile := filepath.Join(homeDir, ".claude", "CLAUDE.md")
 	if err := os.MkdirAll(filepath.Dir(configFile), 0o755); err != nil {
@@ -812,7 +843,7 @@ func TestExecute_UpgradeBackupManifestHasUpgradeMetadata(t *testing.T) {
 	}
 
 	// Find the backup manifest on disk and verify its metadata.
-	backupRoot := backup.BackupRootForHome(homeDir)
+	backupRoot := filepath.Join(homeDir, ".gentle-ai", "backups")
 	entries, err := os.ReadDir(backupRoot)
 	if err != nil {
 		t.Fatalf("ReadDir backups: %v", err)
@@ -845,7 +876,7 @@ func TestExecute_SuccessfulSnapshotHasNoWarning(t *testing.T) {
 	origExecCommand := execCommand
 	t.Cleanup(func() { execCommand = origExecCommand })
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecEcho("ok")
+		return testutil.StubEcho("ok")
 	}
 	// snapshotCreator is intentionally left at its real default.
 
@@ -854,7 +885,9 @@ func TestExecute_SuccessfulSnapshotHasNoWarning(t *testing.T) {
 	}
 	results[0].Tool.GoImportPath = "github.com/Gentleman-Programming/engram/cmd/engram"
 
-	report := Execute(context.Background(), results, linuxProfile(), t.TempDir(), false)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	report := Execute(context.Background(), results, linuxProfile(), home, false)
 
 	if report.BackupWarning != "" {
 		t.Errorf("BackupWarning = %q, want empty when snapshot succeeds", report.BackupWarning)
@@ -1120,6 +1153,7 @@ func TestEnumerateFilesInDir_NilExcludesWalksEverything(t *testing.T) {
 // large runtime directories across ALL agents: Claude, Gemini, OpenCode.
 func TestConfigPathsForBackup_ExcludesRuntimeDirs(t *testing.T) {
 	homeDir := t.TempDir()
+	isolateExecutorEnv(t, homeDir)
 
 	// --- Claude: config file (keep) + runtime dirs (exclude) ---
 	claudeConfig := filepath.Join(homeDir, ".claude", "CLAUDE.md")
@@ -1223,7 +1257,7 @@ func TestExecute_SkippedUpgradeDoesNotRenderFailureMarker(t *testing.T) {
 	t.Cleanup(func() { execCommand = origExecCommand })
 
 	execCommand = func(name string, args ...string) *exec.Cmd {
-		return testExecEcho("should not run")
+		return testutil.StubEcho("should not run")
 	}
 
 	// Windows profile → binary self-update returns manual fallback → UpgradeSkipped.
@@ -1237,7 +1271,9 @@ func TestExecute_SkippedUpgradeDoesNotRenderFailureMarker(t *testing.T) {
 	// Capture the progress output written to the progress writer.
 	var progressBuf bytes.Buffer
 
-	Execute(context.Background(), results, windowsProfile, t.TempDir(), false, &progressBuf)
+	home := t.TempDir()
+	isolateExecutorEnv(t, home)
+	Execute(context.Background(), results, windowsProfile, home, false, &progressBuf)
 
 	got := progressBuf.String()
 

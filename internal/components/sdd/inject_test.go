@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -35,20 +34,10 @@ func mockNoPackageManager(t *testing.T) {
 	t.Cleanup(func() { npmLookPath = orig })
 }
 
-// tempHomeWithUNGStub returns a temp dir with node_modules/unique-names-generator
-// pre-created so OpenCode plugin install skips real bun/npm (CI / Windows-safe).
-func tempHomeWithUNGStub(t *testing.T) string {
-	t.Helper()
-	home := t.TempDir()
-	if runtime.GOOS == "windows" {
-		t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
-		t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-	}
-	p := filepath.Join(home, ".config", "opencode", "node_modules", "unique-names-generator")
-	if err := os.MkdirAll(p, 0o755); err != nil {
-		t.Fatalf("tempHomeWithUNGStub: %v", err)
-	}
-	return home
+// skipOpenCodePluginDeps skips bun/npm install of unique-names-generator in OpenCode inject tests.
+// Use for hermetic runs; integration tests that assert on npm/bun behavior omit this.
+func skipOpenCodePluginDeps() InjectOptions {
+	return InjectOptions{SkipOpenCodePluginInstall: true}
 }
 
 func TestInjectClaudeWritesSectionMarkers(t *testing.T) {
@@ -244,9 +233,9 @@ func TestInjectClaudeCustomModelAssignmentsIsIdempotent(t *testing.T) {
 }
 
 func TestInjectOpenCodeWritesCommandFiles(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	result, err := Inject(home, opencodeAdapter(), "")
+	result, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -303,9 +292,9 @@ func TestInjectOpenCodeWritesCommandFiles(t *testing.T) {
 }
 
 func TestInjectOpenCodeIsIdempotent(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	first, err := Inject(home, opencodeAdapter(), "")
+	first, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject() first error = %v", err)
 	}
@@ -313,7 +302,7 @@ func TestInjectOpenCodeIsIdempotent(t *testing.T) {
 		t.Fatalf("Inject() first changed = false")
 	}
 
-	second, err := Inject(home, opencodeAdapter(), "")
+	second, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject() second error = %v", err)
 	}
@@ -328,7 +317,7 @@ func TestInjectOpenCodeUsesOpenCodeSpecificOrchestratorPrompt(t *testing.T) {
 			home := t.TempDir()
 			mockNoPackageManager(t)
 
-			if _, err := Inject(home, opencodeAdapter(), mode); err != nil {
+			if _, err := Inject(home, opencodeAdapter(), mode, skipOpenCodePluginDeps()); err != nil {
 				t.Fatalf("Inject(%s) error = %v", mode, err)
 			}
 
@@ -385,6 +374,7 @@ func TestInjectOpenCodePreservesExistingOrchestratorPromptWhenRequested(t *testi
 	}
 
 	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		SkipOpenCodePluginInstall:          true,
 		PreserveOpenCodeOrchestratorPrompt: true,
 	})
 	if err != nil {
@@ -423,6 +413,7 @@ func TestInjectOpenCodeMigratesPreservedLegacyOrchestratorPromptReferences(t *te
 	}
 
 	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		SkipOpenCodePluginInstall:          true,
 		PreserveOpenCodeOrchestratorPrompt: true,
 	})
 	if err != nil {
@@ -478,6 +469,7 @@ func TestInjectOpenCodeMigratesLegacyBaseOrchestratorToGentleOrchestrator(t *tes
 	}
 
 	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		SkipOpenCodePluginInstall:          true,
 		PreserveOpenCodeOrchestratorPrompt: true,
 	})
 	if err != nil {
@@ -535,6 +527,7 @@ func TestInjectOpenCodeMigratesMisnamedGentlemanSDDOrchestrator(t *testing.T) {
 	}
 
 	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		SkipOpenCodePluginInstall:          true,
 		PreserveOpenCodeOrchestratorPrompt: true,
 	})
 	if err != nil {
@@ -592,6 +585,7 @@ func TestInjectOpenCodeDeletesRevokedGentlemanAgent(t *testing.T) {
 	}
 
 	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		SkipOpenCodePluginInstall:          true,
 		PreserveOpenCodeOrchestratorPrompt: true,
 	})
 	if err != nil {
@@ -644,7 +638,7 @@ func TestInjectOpenCodeOverwritesOrchestratorPromptByDefault(t *testing.T) {
 		t.Fatalf("WriteFile(opencode.json) error = %v", err)
 	}
 
-	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti)
+	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -663,7 +657,7 @@ func TestInjectOpenCodeOverwritesOrchestratorPromptByDefault(t *testing.T) {
 }
 
 func TestInjectOpenCodeMigratesLegacyAgentsKey(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
 	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
@@ -682,7 +676,7 @@ func TestInjectOpenCodeMigratesLegacyAgentsKey(t *testing.T) {
 		t.Fatalf("WriteFile(opencode.json) error = %v", err)
 	}
 
-	if _, err := Inject(home, opencodeAdapter(), ""); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps()); err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
 
@@ -1170,9 +1164,9 @@ You are a COORDINATOR, not an executor.
 }
 
 func TestInjectOpenCodeMultiMode(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	result, err := Inject(home, opencodeAdapter(), "multi")
+	result, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
@@ -1264,9 +1258,9 @@ func TestInjectOpenCodeMultiMode(t *testing.T) {
 }
 
 func TestInjectOpenCodeMultiModeIdempotent(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	first, err := Inject(home, opencodeAdapter(), "multi")
+	first, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) first error = %v", err)
 	}
@@ -1274,7 +1268,7 @@ func TestInjectOpenCodeMultiModeIdempotent(t *testing.T) {
 		t.Fatal("Inject(multi) first changed = false")
 	}
 
-	second, err := Inject(home, opencodeAdapter(), "multi")
+	second, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) second error = %v", err)
 	}
@@ -1296,7 +1290,7 @@ func TestInjectOpenCodeSubagentPromptsStayExecutorScoped(t *testing.T) {
 	home := t.TempDir()
 	mockNoPackageManager(t)
 
-	if _, err := Inject(home, opencodeAdapter(), "multi"); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps()); err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
 
@@ -1352,9 +1346,9 @@ func TestInjectOpenCodeSubagentPromptsStayExecutorScoped(t *testing.T) {
 }
 
 func TestInjectOpenCodeEmptySDDModeDefaultsSingle(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	result, err := Inject(home, opencodeAdapter(), "")
+	result, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(\"\") error = %v", err)
 	}
@@ -1456,10 +1450,10 @@ func TestInjectClaudeIgnoresSDDMode(t *testing.T) {
 }
 
 func TestInjectOpenCodeSingleToMultiSwitch(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
 	// First: inject single mode.
-	_, err := Inject(home, opencodeAdapter(), "single")
+	_, err := Inject(home, opencodeAdapter(), "single", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(single) error = %v", err)
 	}
@@ -1474,7 +1468,7 @@ func TestInjectOpenCodeSingleToMultiSwitch(t *testing.T) {
 
 	// Second: inject multi mode — structure stays the same (both have all agents),
 	// but the overlay content (prompts) may differ so changed can be true or false.
-	_, err = Inject(home, opencodeAdapter(), "multi")
+	_, err = Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
@@ -1650,7 +1644,7 @@ func TestInjectOpenCodeMultiModeWithModelAssignments(t *testing.T) {
 		"sdd-apply": {ProviderID: "openai", ModelID: "gpt-4o"},
 	}
 
-	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{OpenCodeModelAssignments: assignments})
+	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{SkipOpenCodePluginInstall: true, OpenCodeModelAssignments: assignments})
 	if err != nil {
 		t.Fatalf("Inject(multi, assignments) error = %v", err)
 	}
@@ -1708,7 +1702,7 @@ func TestInjectOpenCodeMultiModeNoAssignmentsNoModel(t *testing.T) {
 	mockNoPackageManager(t)
 
 	// Pass nil assignments — no model fields should be injected.
-	result, err := Inject(home, opencodeAdapter(), "multi")
+	result, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
@@ -1750,7 +1744,7 @@ func TestInjectSingleModeIgnoresModelAssignments(t *testing.T) {
 		"sdd-init": {ProviderID: "anthropic", ModelID: "claude-sonnet-4-20250514"},
 	}
 
-	result, err := Inject(home, opencodeAdapter(), "single", InjectOptions{OpenCodeModelAssignments: assignments})
+	result, err := Inject(home, opencodeAdapter(), "single", InjectOptions{SkipOpenCodePluginInstall: true, OpenCodeModelAssignments: assignments})
 	if err != nil {
 		t.Fatalf("Inject(single, assignments) error = %v", err)
 	}
@@ -1782,7 +1776,7 @@ func TestInjectOpenCodeMultiModeUsesRootModelForUnassignedAgents(t *testing.T) {
 		t.Fatalf("WriteFile(opencode.json) error = %v", err)
 	}
 
-	if _, err := Inject(home, opencodeAdapter(), "multi"); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps()); err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
 
@@ -1841,7 +1835,7 @@ func TestInjectOpenCodeMultiModeExplicitAssignmentsDoNotSpread(t *testing.T) {
 		"sdd-apply": {ProviderID: "anthropic", ModelID: "claude-opus-4-6"},
 	}
 
-	if _, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{OpenCodeModelAssignments: assignments}); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{SkipOpenCodePluginInstall: true, OpenCodeModelAssignments: assignments}); err != nil {
 		t.Fatalf("Inject(multi, assignments) error = %v", err)
 	}
 
@@ -1892,7 +1886,7 @@ func TestInjectOpenCodeSingleModeDoesNotInjectModels(t *testing.T) {
 		t.Fatalf("WriteFile(opencode.json) error = %v", err)
 	}
 
-	if _, err := Inject(home, opencodeAdapter(), "single"); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "single", skipOpenCodePluginDeps()); err != nil {
 		t.Fatalf("Inject(single) error = %v", err)
 	}
 
@@ -1953,7 +1947,7 @@ func TestInjectOpenCodeMultiModePreservesExistingAgentModels(t *testing.T) {
 		t.Fatalf("WriteFile(opencode.json) error = %v", err)
 	}
 
-	if _, err := Inject(home, opencodeAdapter(), "multi"); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps()); err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
 
@@ -2017,7 +2011,7 @@ func TestInjectOpenCodeMultiModeExistingAgentWithNoModelIsNotTouched(t *testing.
 		t.Fatalf("WriteFile(opencode.json) error = %v", err)
 	}
 
-	if _, err := Inject(home, opencodeAdapter(), "multi"); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps()); err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
 
@@ -2065,9 +2059,9 @@ func TestInjectOpenCodeMultiModeExistingAgentWithNoModelIsNotTouched(t *testing.
 // actually written to the agent's skills/_shared/ directory during Inject().
 // This is a disk-level test; assets_test.go only checks the embedded FS.
 func TestInjectWritesAllFourSharedFilesToDisk(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	result, err := Inject(home, opencodeAdapter(), "")
+	result, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -2112,7 +2106,7 @@ func TestInjectWritesAllFourSharedFilesToDisk(t *testing.T) {
 // TestInjectSharedDirCreatedWithAllFiles verifies that Inject() creates the
 // _shared directory when it does not exist and writes all four files into it.
 func TestInjectSharedDirCreatedWithAllFiles(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
 	// Sanity: _shared dir must not exist yet.
 	sharedDir := filepath.Join(home, ".config", "opencode", "skills", "_shared")
@@ -2120,7 +2114,7 @@ func TestInjectSharedDirCreatedWithAllFiles(t *testing.T) {
 		t.Fatal("precondition failed: _shared dir already exists")
 	}
 
-	if _, err := Inject(home, opencodeAdapter(), ""); err != nil {
+	if _, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps()); err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
 
@@ -2320,9 +2314,9 @@ func TestInjectStrictTDDIsIdempotent(t *testing.T) {
 // Specifically, sdd-apply/strict-tdd.md and sdd-verify/strict-tdd-verify.md
 // must be written to disk alongside their SKILL.md files.
 func TestInjectCopiesAllFilesFromSkillDirectory(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	result, err := Inject(home, opencodeAdapter(), "")
+	result, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -2358,9 +2352,9 @@ func TestInjectCopiesAllFilesFromSkillDirectory(t *testing.T) {
 // TestInjectCopiesAllFilesReportedInResult verifies that all skill files
 // (including extra files beyond SKILL.md) are included in result.Files.
 func TestInjectCopiesAllFilesReportedInResult(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	result, err := Inject(home, opencodeAdapter(), "")
+	result, err := Inject(home, opencodeAdapter(), "", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject() error = %v", err)
 	}
@@ -2549,9 +2543,9 @@ func TestInjectClaudeDoesNotStripMarkedSection(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestInjectOpenCodeMultiWritesPlugin(t *testing.T) {
-	home := tempHomeWithUNGStub(t)
+	home := t.TempDir()
 
-	result, err := Inject(home, opencodeAdapter(), "multi")
+	result, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) error = %v", err)
 	}
@@ -2590,7 +2584,7 @@ func TestInjectOpenCodeSingleWritesPlugin(t *testing.T) {
 	home := t.TempDir()
 	mockNoPackageManager(t)
 
-	_, err := Inject(home, opencodeAdapter(), "single")
+	_, err := Inject(home, opencodeAdapter(), "single", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(single) error = %v", err)
 	}
@@ -2612,7 +2606,7 @@ func TestInjectOpenCodePluginNoPkgManagerAvailable(t *testing.T) {
 	home := t.TempDir()
 
 	// Assert: inject succeeds even when no package manager is available (soft skip).
-	result, err := Inject(home, opencodeAdapter(), "multi")
+	result, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) with no package manager error = %v", err)
 	}
@@ -2709,7 +2703,7 @@ func TestInjectOpenCodePluginIdempotent(t *testing.T) {
 	mockNoPackageManager(t)
 
 	// First run
-	first, err := Inject(home, opencodeAdapter(), "multi")
+	first, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) first error = %v", err)
 	}
@@ -2718,7 +2712,7 @@ func TestInjectOpenCodePluginIdempotent(t *testing.T) {
 	}
 
 	// Second run: Changed should be false (plugin unchanged)
-	second, err := Inject(home, opencodeAdapter(), "multi")
+	second, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) second error = %v", err)
 	}
@@ -3114,7 +3108,7 @@ func TestInjectOpenCodeMultiModeWithPreExistingMinimalConfig(t *testing.T) {
 	}
 
 	// This must NOT fail with "post-check: ... missing sdd-apply sub-agent".
-	result, err := Inject(home, opencodeAdapter(), "multi")
+	result, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) with pre-existing minimal config error = %v", err)
 	}
@@ -3184,7 +3178,7 @@ func TestInjectOpenCodeMultiModeWithPreExistingFullConfig(t *testing.T) {
 		t.Fatalf("WriteFile(opencode.json) error = %v", err)
 	}
 
-	result, err := Inject(home, opencodeAdapter(), "multi")
+	result, err := Inject(home, opencodeAdapter(), "multi", skipOpenCodePluginDeps())
 	if err != nil {
 		t.Fatalf("Inject(multi) with full pre-existing config error = %v", err)
 	}
@@ -3261,7 +3255,7 @@ func TestInjectOpenCodeMultiModeAssignsGentleOrchestratorModelFromLegacyOrchestr
 		"sdd-orchestrator": {ProviderID: "openai", ModelID: "gpt-4o"},
 	}
 
-	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{OpenCodeModelAssignments: assignments})
+	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{SkipOpenCodePluginInstall: true, OpenCodeModelAssignments: assignments})
 	if err != nil {
 		t.Fatalf("Inject(multi, assignments) error = %v", err)
 	}
@@ -3309,7 +3303,7 @@ func TestInjectOpenCodeMultiModeInstallsGentleOrchestratorWithModel(t *testing.T
 		"sdd-orchestrator": {ProviderID: "openai", ModelID: "gpt-4o"},
 	}
 
-	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{OpenCodeModelAssignments: assignments})
+	result, err := Inject(home, opencodeAdapter(), "multi", InjectOptions{SkipOpenCodePluginInstall: true, OpenCodeModelAssignments: assignments})
 	if err != nil {
 		t.Fatalf("Inject(multi, assignments) error = %v", err)
 	}
@@ -3958,7 +3952,7 @@ func TestInjectOpenCodePostCheckDiskFallback(t *testing.T) {
 	t.Cleanup(func() { npmLookPath = origNpmLookPath })
 
 	// Run Inject with SDD mode single
-	result, err := Inject(home, opencodeAdapter(), model.SDDModeSingle)
+	result, err := Inject(home, opencodeAdapter(), model.SDDModeSingle, skipOpenCodePluginDeps())
 	if err != nil {
 		// This is the bug: on Windows, even with correct file on disk,
 		// the post-check may fail if in-memory buffer is stale.
@@ -3997,7 +3991,8 @@ func TestInjectOpenCodeWithProfile_PostCheckVerifiesOrchestrator(t *testing.T) {
 	}
 
 	result, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
-		Profiles: []model.Profile{cheapProfile},
+		SkipOpenCodePluginInstall: true,
+		Profiles:                  []model.Profile{cheapProfile},
 	})
 	if err != nil {
 		t.Fatalf("Inject() with profile error = %v", err)
@@ -4024,6 +4019,7 @@ func TestInjectOpenCodeWithProfile_DefaultProfileSkipped(t *testing.T) {
 	mockNoPackageManager(t)
 
 	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		SkipOpenCodePluginInstall: true,
 		Profiles: []model.Profile{
 			{Name: "", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-haiku-3-5"}},
 			{Name: "default", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-haiku-3-5"}},
@@ -4041,6 +4037,7 @@ func TestInjectOpenCodeWithTwoProfiles_BothOrchestratorsPresent(t *testing.T) {
 	mockNoPackageManager(t)
 
 	_, err := Inject(home, opencodeAdapter(), model.SDDModeMulti, InjectOptions{
+		SkipOpenCodePluginInstall: true,
 		Profiles: []model.Profile{
 			{Name: "cheap", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-haiku-3-5"}},
 			{Name: "premium", OrchestratorModel: model.ModelAssignment{ProviderID: "anthropic", ModelID: "claude-opus-4-5"}},

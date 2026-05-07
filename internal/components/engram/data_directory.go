@@ -5,7 +5,6 @@
 package engram
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -463,44 +462,36 @@ func (p *LocalConfigPersister) Write(dir string) error {
 	}
 	s.EngramDataDir = dir
 
-	if err := p.atomicStateWrite(s); err != nil {
+	if err := state.Write(p.homeDir, s); err != nil {
 		return err
 	}
 
-	_ = setDataDirEnv(dir)
-	_ = platform.PersistEngramEnv(dir)
+	var sideEffects []error
+	if err := setDataDirEnv(dir); err != nil {
+		sideEffects = append(sideEffects, fmt.Errorf("set ENGRAM_DATA_DIR in process: %w", err))
+	}
+	if err := platform.PersistEngramEnv(dir); err != nil {
+		sideEffects = append(sideEffects, fmt.Errorf("persist shell/registry env: %w", err))
+	}
+	if len(sideEffects) > 0 {
+		return errors.Join(sideEffects...)
+	}
 	return nil
-}
-
-// atomicStateWrite writes the state atomically using a temp file + rename.
-func (p *LocalConfigPersister) atomicStateWrite(s state.InstallState) error {
-	statePath := state.Path(p.homeDir)
-	tmpPath := statePath + ".tmp"
-
-	data, err := json.MarshalIndent(s, "", "  ")
-	if err != nil {
-		return err
-	}
-	data = append(data, '\n')
-
-	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
-		return err
-	}
-	if err := os.WriteFile(tmpPath, data, 0o644); err != nil {
-		return err
-	}
-	return os.Rename(tmpPath, statePath)
 }
 
 // Clear removes the custom data directory configuration.
 func (p *LocalConfigPersister) Clear() error {
 	_ = unsetDataDirEnv()
+	var writeErr error
 	if s, err := state.Read(p.homeDir); err == nil {
 		s.EngramDataDir = ""
-		_ = state.Write(p.homeDir, s)
+		writeErr = state.Write(p.homeDir, s)
 	}
-	_ = platform.RemoveEngramEnv()
-	return nil
+	var removeErr error
+	if err := platform.RemoveEngramEnv(); err != nil {
+		removeErr = fmt.Errorf("remove shell/registry env: %w", err)
+	}
+	return errors.Join(writeErr, removeErr)
 }
 
 // getDataDirEnv, setDataDirEnv, unsetDataDirEnv are thin wrappers so env.go

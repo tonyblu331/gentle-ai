@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
-	"runtime"
 	"strings"
 	"testing"
 
@@ -177,11 +176,7 @@ func TestInjectGeminiCLIUsesAutoEditMode(t *testing.T) {
 
 func TestInjectVSCodeCopilotUsesAutoApprove(t *testing.T) {
 	home := t.TempDir()
-	if runtime.GOOS == "windows" {
-		t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
-	} else {
-		t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
 	adapter := vscodeAdapter()
 	result, err := Inject(home, adapter)
@@ -216,11 +211,7 @@ func TestInjectVSCodeCopilotUsesAutoApprove(t *testing.T) {
 
 func TestInjectVSCodeCopilotMergesIntoJSONCSettings(t *testing.T) {
 	home := t.TempDir()
-	if runtime.GOOS == "windows" {
-		t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
-	} else {
-		t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
-	}
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 
 	adapter := vscodeAdapter()
 	settingsPath := adapter.SettingsPath(home)

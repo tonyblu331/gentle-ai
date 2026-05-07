@@ -202,7 +202,7 @@ func (b *LocalDataBackend) CopyData(source, target string) (Result, error) {
 
 	if totalSize > 0 {
 		if err := requireFreeSpace(target, totalSize); err != nil {
-			return Result{}, err
+			return Result{}, fmt.Errorf("%w: %v", ErrInsufficientSpace, err)
 		}
 	}
 

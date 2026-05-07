@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -16,6 +17,17 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/state"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
 )
+
+// setTestHomeEnv pins HOME for ListBackups (override branch) and, on Windows,
+// USERPROFILE so os.UserHomeDir — used by CLI restore via internal/cli — resolves
+// to the temp directory (USERPROFILE takes precedence over HOME on Windows).
+func setTestHomeEnv(t *testing.T, home string) {
+	t.Helper()
+	t.Setenv("HOME", home)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", home)
+	}
+}
 
 // TestListBackupsNewestFirst verifies that ListBackups returns manifests sorted
 // newest-first by CreatedAt timestamp, matching the spec "newest first" ordering.
@@ -51,10 +63,7 @@ func TestListBackupsNewestFirst(t *testing.T) {
 		}
 	}
 
-	// Temporarily override home dir resolution for ListBackups.
-	origHomeDir := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHomeDir) })
-	os.Setenv("HOME", home)
+	setTestHomeEnv(t, home)
 
 	manifests := ListBackups()
 
@@ -98,9 +107,7 @@ func TestListBackupsWithSourceMetadata(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	origHome := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHome) })
-	os.Setenv("HOME", home)
+	setTestHomeEnv(t, home)
 
 	manifests := ListBackups()
 
@@ -122,9 +129,7 @@ func TestListBackupsWithSourceMetadata(t *testing.T) {
 // (either a backup list or a "no backups" message — never "unknown command").
 func TestRunArgsRestoreListIsDispatched(t *testing.T) {
 	home := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHome) })
-	os.Setenv("HOME", home)
+	setTestHomeEnv(t, home)
 
 	var buf bytes.Buffer
 	err := RunArgs([]string{"restore", "--list"}, &buf)
@@ -177,9 +182,7 @@ func TestRunArgsRestoreByIDWithYes(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	origHome := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHome) })
-	os.Setenv("HOME", home)
+	setTestHomeEnv(t, home)
 
 	var buf bytes.Buffer
 	err := RunArgs([]string{"restore", "test-backup-001", "--yes"}, &buf)
@@ -197,9 +200,7 @@ func TestRunArgsRestoreByIDWithYes(t *testing.T) {
 // is surfaced as an error from RunArgs.
 func TestRunArgsRestoreUnknownIDReturnsError(t *testing.T) {
 	home := t.TempDir()
-	origHome := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHome) })
-	os.Setenv("HOME", home)
+	setTestHomeEnv(t, home)
 
 	var buf bytes.Buffer
 	err := RunArgs([]string{"restore", "no-such-backup", "--yes"}, &buf)
@@ -262,9 +263,7 @@ func TestListBackupsFallsBackGracefullyForOldManifests(t *testing.T) {
 		t.Fatalf("WriteManifest: %v", err)
 	}
 
-	origHome := os.Getenv("HOME")
-	t.Cleanup(func() { os.Setenv("HOME", origHome) })
-	os.Setenv("HOME", home)
+	setTestHomeEnv(t, home)
 
 	manifests := ListBackups()
 
@@ -618,14 +617,7 @@ func TestUnknownCommandSuggestsHelp(t *testing.T) {
 // EngramDataDir is preserved in state (not overwritten with an empty string).
 func TestTuiExecute_PreservesExistingEngramDataDir(t *testing.T) {
 	home := t.TempDir()
-	origHome := os.Getenv("HOME")
-	origUserProfile := os.Getenv("USERPROFILE")
-	t.Cleanup(func() {
-		os.Setenv("HOME", origHome)
-		os.Setenv("USERPROFILE", origUserProfile)
-	})
-	os.Setenv("HOME", home)
-	os.Setenv("USERPROFILE", home)
+	setTestHomeEnv(t, home)
 
 	// Pre-populate state with a custom EngramDataDir.
 	err := state.Write(home, state.InstallState{
@@ -659,14 +651,7 @@ func TestTuiExecute_PreservesExistingEngramDataDir(t *testing.T) {
 // selection.EngramDataDir is non-empty, it overwrites the persisted value.
 func TestTuiExecute_OverwritesEngramDataDirWhenExplicit(t *testing.T) {
 	home := t.TempDir()
-	origHome := os.Getenv("HOME")
-	origUserProfile := os.Getenv("USERPROFILE")
-	t.Cleanup(func() {
-		os.Setenv("HOME", origHome)
-		os.Setenv("USERPROFILE", origUserProfile)
-	})
-	os.Setenv("HOME", home)
-	os.Setenv("USERPROFILE", home)
+	setTestHomeEnv(t, home)
 
 	// Pre-populate state with an old custom EngramDataDir.
 	err := state.Write(home, state.InstallState{

@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+
+	"github.com/gentleman-programming/gentle-ai/internal/components/filemerge"
 )
 
 const stateDir = ".gentle-ai"
@@ -77,5 +79,7 @@ func Write(homeDir string, s InstallState) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(Path(homeDir), append(data, '\n'), 0o644)
+	payload := append(data, '\n')
+	_, err = filemerge.WriteFileAtomic(Path(homeDir), payload, 0o644)
+	return err
 }

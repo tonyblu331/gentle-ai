@@ -4,7 +4,6 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
-	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -14,35 +13,6 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 	"github.com/gentleman-programming/gentle-ai/internal/state"
 )
-
-// isolateWindowsAppDataForCLI scopes Windows roaming/local app dirs under home so
-// host-installed agents do not appear in discovery/sync integration tests.
-func isolateWindowsAppDataForCLI(t *testing.T, home string) {
-	t.Helper()
-	if runtime.GOOS != "windows" {
-		return
-	}
-	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
-	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
-}
-
-// seedOpenCodeUNGStub pre-creates the SDD post-install check path so tests do
-// not invoke real bun/npm against a temp OpenCode dir (portable / CI-safe).
-func seedOpenCodeUNGStub(t *testing.T, home string) {
-	t.Helper()
-	p := filepath.Join(home, ".config", "opencode", "node_modules", "unique-names-generator")
-	if err := os.MkdirAll(p, 0o755); err != nil {
-		t.Fatalf("seedOpenCodeUNGStub: %v", err)
-	}
-}
-
-func cliIntegrationHome(t *testing.T) string {
-	t.Helper()
-	home := t.TempDir()
-	isolateWindowsAppDataForCLI(t, home)
-	seedOpenCodeUNGStub(t, home)
-	return home
-}
 
 // ─── Phase 1: ParseSyncFlags ───────────────────────────────────────────────
 
@@ -357,7 +327,7 @@ func TestDiscoverAgentsReturnsAgentsWithConfigDirPresent(t *testing.T) {
 }
 
 func TestDiscoverAgentsReturnsEmptyWhenNoConfigDirsPresent(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	// Empty home dir — no agent config dirs exist.
 
 	discovered := DiscoverAgents(home)
@@ -423,7 +393,7 @@ func TestDiscoverAgentsMultiplePresent(t *testing.T) {
 //   - not return agents whose config dir is absent
 //   - produce the same set as agents.DiscoverInstalled for the same homeDir
 func TestDiscoverAgentsDelegatesCanonicalDiscovery(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 
 	// Create only the codex config dir — a less-common agent that would be
 	// absent from a minimal stale hardcoded list if someone forgot to update it.
@@ -544,7 +514,7 @@ func TestComponentSyncStepRunsPersonaInjectForSync(t *testing.T) {
 }
 
 func TestComponentSyncStepRunsSDDInject(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 
 	step := componentSyncStep{
 		id:        "sync:sdd",
@@ -617,7 +587,7 @@ func TestComponentSyncStepRunsGGAInjectWithoutBinaryInstall(t *testing.T) {
 // ─── Phase 4: RunSync integration tests ───────────────────────────────────
 
 func TestRunSyncAppliesManagedFilesystemChanges(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand
@@ -651,7 +621,7 @@ func TestRunSyncAppliesManagedFilesystemChanges(t *testing.T) {
 }
 
 func TestRunSyncDoesNotInvokeEngramSetup(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
@@ -683,7 +653,7 @@ func TestRunSyncDoesNotInvokeEngramSetup(t *testing.T) {
 }
 
 func TestRunSyncDoesNotInstallBinaries(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
@@ -720,7 +690,7 @@ func TestRunSyncDoesNotInstallBinaries(t *testing.T) {
 }
 
 func TestRunSyncPreservesUnmanagedAdjacentFiles(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 
 	// Create user-owned config file adjacent to managed overlay.
 	userConfigDir := filepath.Join(home, ".config", "opencode")
@@ -863,7 +833,7 @@ func TestRunSyncIsIdempotent(t *testing.T) {
 // "No managed assets to sync — system completes without modifying unrelated
 // files and reports that no managed sync actions were needed."
 func TestRunSyncNoOpWhenNoAgentsDiscovered(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
@@ -906,7 +876,7 @@ func TestRunSyncNoOpWhenNoAgentsDiscovered(t *testing.T) {
 // TestRenderSyncReportIncludesManagedActions verifies that the sync output
 // reports the managed actions that were executed, not just verification results.
 func TestRenderSyncReportIncludesManagedActions(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand
@@ -951,7 +921,7 @@ func TestRenderSyncReportIncludesManagedActions(t *testing.T) {
 // that is NOT part of the managed inventory (simulating an unmanaged lookalike).
 // After sync, the lookalike must remain byte-for-byte unchanged.
 func TestRunSyncExcludesUnmanagedLookalikeFile(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 
 	// Create a directory structure that is NOT the agent config dir.
 	// "AGENTS.md" is a known managed file for opencode (under ~/.config/opencode/).
@@ -1012,7 +982,7 @@ func TestRunSyncExcludesUnmanagedLookalikeFile(t *testing.T) {
 // This is distinct from TestRunSyncNoOpWhenNoAgentsDiscovered: agents ARE
 // present, but all inject calls write nothing new (WriteFileAtomic is no-op).
 func TestRunSyncNoOpWhenAssetsAlreadyCurrent(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand
@@ -1069,7 +1039,7 @@ func TestRunSyncNoOpWhenAssetsAlreadyCurrent(t *testing.T) {
 // On a fresh home, files are written so the count must be > 0.
 // On a second sync, nothing changes so the count must be 0.
 func TestSyncActionsExecutedReflectsChangedFiles(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand
@@ -1123,7 +1093,7 @@ func TestSyncActionsExecutedReflectsChangedFiles(t *testing.T) {
 // 5. Asserts prompt files exist in ~/.config/opencode/prompts/sdd/
 // 6. Runs sync AGAIN with no changes → asserts filesChanged=0 (idempotent)
 func TestRunSyncWithProfilesIntegration(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
 	t.Cleanup(func() {
@@ -1269,7 +1239,7 @@ func TestRunSyncWithProfilesIntegration(t *testing.T) {
 // when no explicit profiles are provided (normal sync), DetectProfiles is called
 // to find existing profiles and their prompts are regenerated.
 func TestRunSyncDetectsExistingProfilesOnRegularSync(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
 	t.Cleanup(func() {
@@ -1479,7 +1449,7 @@ func TestRunSyncWithSelection_NoAgentsIsNoOp(t *testing.T) {
 // TestRunSyncWithSelection_WritesExpectedFiles verifies that the function
 // creates managed asset files for the provided agents and components.
 func TestRunSyncWithSelection_WritesExpectedFiles(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
 	t.Cleanup(func() {
@@ -1515,7 +1485,7 @@ func TestRunSyncWithSelection_WritesExpectedFiles(t *testing.T) {
 // TestRunSyncWithSelection_FilesChangedOnFreshHome verifies that syncing a
 // fresh home dir results in FilesChanged > 0.
 func TestRunSyncWithSelection_FilesChangedOnFreshHome(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
 	t.Cleanup(func() {
@@ -1545,7 +1515,7 @@ func TestRunSyncWithSelection_FilesChangedOnFreshHome(t *testing.T) {
 // TestRunSyncWithSelection_IsIdempotent verifies that running twice produces
 // FilesChanged=0 on the second run (all assets already current).
 func TestRunSyncWithSelection_IsIdempotent(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
 	t.Cleanup(func() {
@@ -1587,7 +1557,7 @@ func TestRunSyncWithSelection_IsIdempotent(t *testing.T) {
 // TestRunSyncWithSelection_SelectionAgentsForwarded verifies that the agents in
 // the selection are reflected in the result.
 func TestRunSyncWithSelection_SelectionAgentsForwarded(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
 	t.Cleanup(func() {
@@ -2012,7 +1982,7 @@ func TestBuildSyncSelectionSDDProfileStrategyForwarded(t *testing.T) {
 // the selection with the persisted assignments rather than falling back to the
 // "balanced" preset defaults.
 func TestRunSyncLoadsPersistedModelAssignments(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand
@@ -2073,7 +2043,7 @@ func TestRunSyncLoadsPersistedModelAssignments(t *testing.T) {
 // full cycle: sync1 loads persisted assignments → sync2 still has them.
 // This is the core promise of the fix.
 func TestRunSyncDoesNotOverridePersistedAssignmentsOnSecondSync(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand
@@ -2131,7 +2101,7 @@ func TestRunSyncDoesNotOverridePersistedAssignmentsOnSecondSync(t *testing.T) {
 // TestRunSyncWithNoPersistedAssignmentsDoesNotPanic verifies graceful behavior
 // when state.json has no model assignments (backward compat with old state).
 func TestRunSyncWithNoPersistedAssignmentsDoesNotPanic(t *testing.T) {
-	home := cliIntegrationHome(t)
+	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreBackupHome := backup.UserHomeDirFn
 	restoreCommand := runCommand

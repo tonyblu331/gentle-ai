@@ -45,6 +45,12 @@ type InjectOptions struct {
 	// Used by external-single-active profile strategy integrations where
 	// external tools extend orchestrator policy/prompt at runtime.
 	PreserveOpenCodeOrchestratorPrompt bool
+
+	// SkipOpenCodePluginInstall skips installing the unique-names-generator npm
+	// dependency (bun/npm) after writing the background-agents plugin. Tests
+	// that mock the package manager or that only assert on JSON/prompt output
+	// should set this to true for hermetic, CI-friendly runs.
+	SkipOpenCodePluginInstall bool
 }
 
 // workflowInjector is an optional adapter capability: if an adapter
@@ -396,7 +402,7 @@ func Inject(homeDir string, adapter agents.Adapter, sddMode model.SDDModeID, opt
 			mergedSettingsBytes = agentResult.merged
 
 			// Install OpenCode plugins (all SDD modes).
-			pluginResult, err := installOpenCodePlugins(homeDir, adapter)
+			pluginResult, err := installOpenCodePlugins(homeDir, adapter, opts.SkipOpenCodePluginInstall)
 			if err != nil {
 				return InjectionResult{}, err
 			}
@@ -865,11 +871,13 @@ func readMisnamedOpenCodeGentlemanSDDPrompt(settingsPath string) (string, error)
 	return prompt, nil
 }
 
-// installOpenCodePlugins copies the background-agents plugin and installs its
-// npm/bun dependency into the agent's global config directory. Returns an error
-// with an actionable message if the package manager is present but the install
-// fails. If no package manager is available, the install is skipped (soft failure).
-func installOpenCodePlugins(homeDir string, adapter agents.Adapter) (InjectionResult, error) {
+// installOpenCodePlugins copies the background-agents plugin and optionally installs its
+// npm/bun dependency into the agent's global config directory.
+//
+// If skipDepInstall is true, only the plugin source file is written (tests).
+// Otherwise bun/npm may run to install unique-names-generator; errors surface if the
+// package manager fails. If no package manager exists, install is skipped (soft failure).
+func installOpenCodePlugins(homeDir string, adapter agents.Adapter, skipDepInstall bool) (InjectionResult, error) {
 	opencodeDir := adapter.GlobalConfigDir(homeDir)
 	pluginsDir := filepath.Join(opencodeDir, "plugins")
 
@@ -887,6 +895,10 @@ func installOpenCodePlugins(homeDir string, adapter agents.Adapter) (InjectionRe
 
 	files := []string{pluginPath}
 	changed := writeResult.Changed
+
+	if skipDepInstall {
+		return InjectionResult{Changed: changed, Files: files}, nil
+	}
 
 	// Install dependency — prefer bun (OpenCode uses it), fall back to npm.
 	// If neither is available, skip with a soft no-op (npm/bun not installed).

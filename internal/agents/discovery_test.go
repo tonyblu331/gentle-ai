@@ -254,6 +254,8 @@ func TestConfigRootsForBackup_NilSafeOnEmptyRegistry(t *testing.T) {
 
 // isolateWindowsAppConfigRoots scopes %APPDATA% under home on Windows so host
 // agent installs (e.g. kiro-ide under real Roaming) do not affect discovery.
+// USERPROFILE is also pointed at home so any os.UserHomeDir-based paths stay under
+// the temp tree if an adapter falls back to profile-relative resolution.
 func isolateWindowsAppConfigRoots(t *testing.T, home string) {
 	t.Helper()
 	if runtime.GOOS != "windows" {
@@ -261,6 +263,7 @@ func isolateWindowsAppConfigRoots(t *testing.T, home string) {
 	}
 	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	t.Setenv("USERPROFILE", home)
 }
 
 // ─── Integration: DefaultRegistry ────────────────────────────────────────

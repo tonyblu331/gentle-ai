@@ -18,7 +18,7 @@ type RestoreFunc func(manifest backup.Manifest) error
 // RunRestore is the top-level entry point for `gentle-ai restore [args]`.
 // It reads backups from the real home directory and uses the default restore function.
 func RunRestore(args []string, stdout io.Writer) error {
-	homeDir, err := effectiveRestoreHomeDir()
+	homeDir, err := osUserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
@@ -30,7 +30,7 @@ func RunRestore(args []string, stdout io.Writer) error {
 // RunRestoreWithFn is the testable variant of RunRestore. It uses the provided
 // RestoreFunc and reads backups from the HOME environment variable (set by tests).
 func RunRestoreWithFn(args []string, restorer RestoreFunc, stdout io.Writer) error {
-	homeDir, err := effectiveRestoreHomeDir()
+	homeDir, err := osUserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
@@ -41,26 +41,12 @@ func RunRestoreWithFn(args []string, restorer RestoreFunc, stdout io.Writer) err
 // RunRestoreWithFnAndInput is the fully injectable variant used in tests that
 // need to simulate stdin input (e.g. testing confirmation prompts).
 func RunRestoreWithFnAndInput(args []string, restorer RestoreFunc, stdout io.Writer, stdin io.Reader) error {
-	homeDir, err := effectiveRestoreHomeDir()
+	homeDir, err := osUserHomeDir()
 	if err != nil {
 		return fmt.Errorf("resolve home directory: %w", err)
 	}
 
 	return runRestoreWithHomeDir(args, restorer, stdout, stdin, homeDir)
-}
-
-func effectiveRestoreHomeDir() (string, error) {
-	homeDir, err := osUserHomeDir()
-	if err != nil {
-		if override := os.Getenv("HOME"); override != "" {
-			return override, nil
-		}
-		return "", err
-	}
-	if override := os.Getenv("HOME"); override != "" {
-		return override, nil
-	}
-	return homeDir, nil
 }
 
 // runRestoreWithHomeDir is the internal implementation.
@@ -200,38 +186,27 @@ func promptRestoreConfirm(manifest backup.Manifest, stdin io.Reader, stdout io.W
 	return strings.EqualFold(answer, "yes"), nil
 }
 
-// listBackupsFromDir reads and sorts backups from the current Engram backup
-// root plus the legacy ~/.gentle-ai/backups root. It operates on an explicit
-// homeDir, keeping the cli package independent from the app package.
+// listBackupsFromDir reads and sorts backups from the given homeDir.
+// It is equivalent to app.ListBackups but operates on an explicit homeDir,
+// keeping the cli package independent from the app package.
 func listBackupsFromDir(homeDir string) []backup.Manifest {
-	roots := []string{
-		backup.BackupRootForHome(homeDir),
-		backup.LegacyBackupRoot(homeDir),
+	backupRoot := backupRootDir(homeDir)
+	entries, err := os.ReadDir(backupRoot)
+	if err != nil {
+		return nil
 	}
 
-	seenRoots := make(map[string]struct{}, len(roots))
-	manifests := make([]backup.Manifest, 0)
-	for _, backupRoot := range roots {
-		if _, seen := seenRoots[backupRoot]; seen {
+	manifests := make([]backup.Manifest, 0, len(entries))
+	for _, entry := range entries {
+		if !entry.IsDir() {
 			continue
 		}
-		seenRoots[backupRoot] = struct{}{}
-
-		entries, err := os.ReadDir(backupRoot)
+		manifestPath := fmt.Sprintf("%s/%s/%s", backupRoot, entry.Name(), backup.ManifestFilename)
+		m, err := backup.ReadManifest(manifestPath)
 		if err != nil {
 			continue
 		}
-		for _, entry := range entries {
-			if !entry.IsDir() {
-				continue
-			}
-			manifestPath := fmt.Sprintf("%s/%s/%s", backupRoot, entry.Name(), backup.ManifestFilename)
-			m, err := backup.ReadManifest(manifestPath)
-			if err != nil {
-				continue
-			}
-			manifests = append(manifests, m)
-		}
+		manifests = append(manifests, m)
 	}
 
 	// Sort newest-first.
@@ -244,6 +219,11 @@ func listBackupsFromDir(homeDir string) []backup.Manifest {
 	}
 
 	return manifests
+}
+
+// backupRootDir returns the path to the backup directory under homeDir.
+func backupRootDir(homeDir string) string {
+	return homeDir + "/.gentle-ai/backups"
 }
 
 // defaultRestorer returns the standard backup.RestoreService.Restore function.

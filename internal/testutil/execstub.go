@@ -1,32 +1,32 @@
-// Package testutil provides cross-platform subprocess stubs for tests.
-// Unix shells expose echo/true/false as binaries; Windows does not.
+// Package testutil holds helpers shared by tests (cross-platform process stubs).
 package testutil
 
 import (
+	"fmt"
 	"os/exec"
 	"runtime"
+	"strconv"
 )
 
-// StubEcho returns a command that prints args (space-separated) and exits 0.
-func StubEcho(parts ...string) *exec.Cmd {
-	if len(parts) == 0 {
-		return StubExit0()
-	}
+// StubEcho returns a command that prints msg to stdout and exits 0 (Unix + Windows).
+func StubEcho(msg string) *exec.Cmd {
 	if runtime.GOOS == "windows" {
-		return exec.Command("cmd", append([]string{"/c", "echo"}, parts...)...)
+		// Avoid cmd.exe "echo" quirks (some strings parse differently); PowerShell is deterministic.
+		return exec.Command("powershell", "-NoProfile", "-NonInteractive", "-Command",
+			fmt.Sprintf("Write-Output %s", strconv.Quote(msg)))
 	}
-	return exec.Command("echo", parts...)
+	return exec.Command("echo", msg)
 }
 
-// StubExit0 runs a no-op command that exits with status 0.
-func StubExit0() *exec.Cmd {
+// StubOK exits with status 0.
+func StubOK() *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		return exec.Command("cmd", "/c", "exit", "0")
 	}
 	return exec.Command("true")
 }
 
-// StubExit1 runs a command that exits with status 1.
+// StubExit1 exits with status 1.
 func StubExit1() *exec.Cmd {
 	if runtime.GOOS == "windows" {
 		return exec.Command("cmd", "/c", "exit", "1")

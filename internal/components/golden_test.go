@@ -126,7 +126,7 @@ func TestGoldenSDD_Claude(t *testing.T) {
 func TestGoldenSDD_OpenCode(t *testing.T) {
 	home := t.TempDir()
 
-	result, err := sdd.Inject(home, opencodeAdapter(), "")
+	result, err := sdd.Inject(home, opencodeAdapter(), "", sdd.InjectOptions{SkipOpenCodePluginInstall: true})
 	if err != nil {
 		t.Fatalf("sdd.Inject(opencode) error = %v", err)
 	}
@@ -159,7 +159,7 @@ func TestGoldenSDD_OpenCode(t *testing.T) {
 func TestGoldenSDD_OpenCode_Multi(t *testing.T) {
 	home := t.TempDir()
 
-	result, err := sdd.Inject(home, opencodeAdapter(), "multi")
+	result, err := sdd.Inject(home, opencodeAdapter(), "multi", sdd.InjectOptions{SkipOpenCodePluginInstall: true})
 	if err != nil {
 		t.Fatalf("sdd.Inject(opencode, multi) error = %v", err)
 	}
@@ -177,7 +177,24 @@ func TestGoldenSDD_OpenCode_Multi(t *testing.T) {
 	// Normalize the absolute home path in the settings JSON so the golden
 	// file remains stable across test runs (temp dirs change each run).
 	// Sub-agent prompts now use {file:/abs/path/...} references.
-	normalizedSettings := []byte(strings.ReplaceAll(string(settingsJSON), home, "{{HOME}}"))
+	// Normalize absolute {file:...} prompt paths (Windows vs goldens with / and {{HOME}}).
+	normalized := string(settingsJSON)
+	for _, phase := range []string{
+		"sdd-apply", "sdd-archive", "sdd-design", "sdd-explore", "sdd-init", "sdd-onboard",
+		"sdd-propose", "sdd-spec", "sdd-tasks", "sdd-verify",
+	} {
+		full := filepath.Join(sdd.SharedPromptDir(home), phase+".md")
+		canonical := "{{HOME}}/.config/opencode/prompts/sdd/" + phase + ".md"
+		normalized = strings.ReplaceAll(normalized, full, canonical)
+		normalized = strings.ReplaceAll(normalized, filepath.ToSlash(full), canonical)
+		// JSON string values escape '\' as "\\" in the on-disk opencode.json file.
+		jsonEscaped := strings.ReplaceAll(full, `\`, `\\`)
+		normalized = strings.ReplaceAll(normalized, jsonEscaped, canonical)
+	}
+	// json.Marshal may emit "\r\n" escapes inside string values on Windows; goldens use "\n".
+	normalized = strings.ReplaceAll(normalized, "\\r\\n", "\\n")
+	normalized = strings.ReplaceAll(normalized, "\\r", "")
+	normalizedSettings := []byte(normalized)
 	assertGolden(t, "sdd-opencode-multi-settings.golden", normalizedSettings)
 
 	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "background-agents.ts")
@@ -567,6 +584,7 @@ func TestGoldenPersona_Kiro_Gentleman(t *testing.T) {
 
 func TestGoldenEngram_Claude(t *testing.T) {
 	home := t.TempDir()
+	unsetEngramDataDirForGolden(t)
 
 	engram.SetLookPathForTest(t, "/opt/homebrew/bin/engram", "")
 
@@ -589,6 +607,7 @@ func TestGoldenEngram_Claude(t *testing.T) {
 
 func TestGoldenEngram_OpenCode(t *testing.T) {
 	home := t.TempDir()
+	unsetEngramDataDirForGolden(t)
 
 	// Mock engramLookPath so the resolved command matches the golden file regardless
 	// of whether engram is installed at /opt/homebrew/bin/engram on the current machine.
@@ -608,6 +627,7 @@ func TestGoldenEngram_OpenCode(t *testing.T) {
 
 func TestGoldenEngram_Windsurf(t *testing.T) {
 	home := t.TempDir()
+	unsetEngramDataDirForGolden(t)
 
 	engram.SetLookPathForTest(t, "/opt/homebrew/bin/engram", "")
 
@@ -625,6 +645,7 @@ func TestGoldenEngram_Windsurf(t *testing.T) {
 
 func TestGoldenEngram_Kiro(t *testing.T) {
 	home := t.TempDir()
+	unsetEngramDataDirForGolden(t)
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 
@@ -836,6 +857,7 @@ func TestGoldenPersona_Antigravity_Gentleman(t *testing.T) {
 
 func TestGoldenEngram_Antigravity(t *testing.T) {
 	home := t.TempDir()
+	unsetEngramDataDirForGolden(t)
 
 	engram.SetLookPathForTest(t, "/opt/homebrew/bin/engram", "")
 
@@ -859,6 +881,21 @@ func TestGoldenEngram_Antigravity(t *testing.T) {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+// unsetEngramDataDirForGolden clears ENGRAM_DATA_DIR so MCP JSON matches goldens
+// that assume the default data directory (CI/agents often export the variable).
+func unsetEngramDataDirForGolden(t *testing.T) {
+	t.Helper()
+	orig := os.Getenv(engram.DataDirEnvVar)
+	os.Unsetenv(engram.DataDirEnvVar)
+	t.Cleanup(func() {
+		if orig == "" {
+			_ = os.Unsetenv(engram.DataDirEnvVar)
+		} else {
+			_ = os.Setenv(engram.DataDirEnvVar, orig)
+		}
+	})
+}
 
 func goldenDir(t *testing.T) string {
 	t.Helper()

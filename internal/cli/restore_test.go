@@ -4,12 +4,12 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/internal/backup"
-	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
 )
 
 // setupRestoreHome creates a temporary home dir with N backup manifests.
@@ -283,18 +283,11 @@ func TestRunRestore_UnknownFlagReturnsError(t *testing.T) {
 
 // --- helpers ---
 
-// restoreHomeDir sets HOME to dir for the duration of the test.
+// restoreHomeDir scopes HOME (and on Windows USERPROFILE) so os.UserHomeDir matches dir.
 func restoreHomeDir(t *testing.T, dir string) {
 	t.Helper()
-	orig := os.Getenv("HOME")
-	origDataDir := os.Getenv(engram.DataDirEnvVar)
-	origHomeFn := osUserHomeDir
-	t.Cleanup(func() {
-		_ = os.Setenv("HOME", orig)
-		_ = os.Setenv(engram.DataDirEnvVar, origDataDir)
-		osUserHomeDir = origHomeFn
-	})
-	os.Setenv("HOME", dir)
-	osUserHomeDir = func() (string, error) { return dir, nil }
-	_ = os.Unsetenv(engram.DataDirEnvVar)
+	t.Setenv("HOME", dir)
+	if runtime.GOOS == "windows" {
+		t.Setenv("USERPROFILE", dir)
+	}
 }
