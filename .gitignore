@@ -36,3 +36,6 @@ dist/
 # Engram local runtime state (project sync chunks are intentionally versioned)
 .engram/engram.db
 .engram/cloud.json
+
+# PR draft text for GitHub paste only — keep out of pushed commits
+docs/PR-BODY-*.md
