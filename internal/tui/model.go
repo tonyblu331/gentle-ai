@@ -418,6 +418,7 @@ type Model struct {
 	EngramDataDirInput           string                      // text buffer for custom path
 	EngramDataDirPos             int                         // cursor position in runes
 	EngramDataDirErr             string                      // validation error
+	EngramDataDirPreviewErr      string                      // preview recomputation error (non-path-validation)
 	EngramDataDirDefaultSpace    uint64                      // cached available space at default dir
 	EngramDataDirSuggestions     []engram.LocationSuggestion // cached location suggestions
 
@@ -809,7 +810,7 @@ func (m Model) View() string {
 				CustomPath:         m.EngramDataDirInput,
 				Cursor:             m.Cursor,
 				InputPos:           m.EngramDataDirPos,
-				ErrMsg:             m.EngramDataDirErr,
+				ErrMsg:             m.engramPathPickerErrMsg(),
 				SuggestedLocations: m.EngramDataDirSuggestions,
 				FilesToMove:        engram.PreviewFileNames(preview.Files),
 				TotalBytes:         preview.TotalBytes,
@@ -826,7 +827,7 @@ func (m Model) View() string {
 				CustomPath:         m.EngramDataDirInput,
 				Cursor:             m.Cursor,
 				InputPos:           m.EngramDataDirPos,
-				ErrMsg:             m.EngramDataDirErr,
+				ErrMsg:             m.engramPathPickerErrMsg(),
 				FilesToMove:        engram.PreviewFileNames(preview.Files),
 				TotalBytes:         preview.TotalBytes,
 				TargetSpace:        preview.AvailableSpace,
@@ -3133,6 +3134,17 @@ func errString(err error) string {
 	return err.Error()
 }
 
+func (m Model) engramPathPickerErrMsg() string {
+	v, p := m.EngramDataDirErr, m.EngramDataDirPreviewErr
+	if v != "" && p != "" {
+		return v + "\n" + p
+	}
+	if p != "" {
+		return p
+	}
+	return v
+}
+
 // engramAction maps the screen choice constant to the service action.
 func (m Model) engramAction() engram.Action {
 	switch m.EngramDataDirChoice {
@@ -3162,7 +3174,13 @@ func (m Model) engramPreview(backend engram.DataBackend, action engram.Action) (
 func (m *Model) refreshEngramPreview() {
 	backend := engram.NewLocalDataBackend()
 	action := m.engramAction()
-	preview, _ := m.engramPreview(backend, action)
+	preview, err := m.engramPreview(backend, action)
+	if err != nil {
+		m.EngramDataDirPreview = engram.Preview{}
+		m.EngramDataDirPreviewErr = errString(err)
+		return
+	}
+	m.EngramDataDirPreviewErr = ""
 	m.EngramDataDirPreview = preview
 }
 

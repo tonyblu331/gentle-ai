@@ -2,6 +2,7 @@ package system
 
 import (
 	"context"
+	"runtime"
 	"testing"
 )
 
@@ -243,11 +244,14 @@ func TestRenderDependencyReportMissing(t *testing.T) {
 }
 
 func TestDetectSingleDepWithEchoTrue(t *testing.T) {
-	// This test uses "echo" which should be on PATH everywhere.
+	detectCmd := []string{"echo", "v1.0.0"}
+	if runtime.GOOS == "windows" {
+		detectCmd = []string{"cmd", "/c", "echo", "v1.0.0"}
+	}
 	dep := Dependency{
 		Name:      "echo",
 		Required:  true,
-		DetectCmd: []string{"echo", "v1.0.0"},
+		DetectCmd: detectCmd,
 	}
 
 	result := detectSingleDep(context.Background(), dep)
@@ -274,12 +278,15 @@ func TestDetectSingleDepNonExistentBinary(t *testing.T) {
 }
 
 func TestDetectSingleDepMinVersionFail(t *testing.T) {
-	// Use echo to produce a version below the minimum.
+	detectCmd := []string{"echo", "v1.0.0"}
+	if runtime.GOOS == "windows" {
+		detectCmd = []string{"cmd", "/c", "echo", "v1.0.0"}
+	}
 	dep := Dependency{
 		Name:       "echo",
 		Required:   true,
 		MinVersion: "99.0.0",
-		DetectCmd:  []string{"echo", "v1.0.0"},
+		DetectCmd:  detectCmd,
 	}
 
 	result := detectSingleDep(context.Background(), dep)

@@ -45,10 +45,21 @@ func NewRecorder(dir string) *Recorder {
 	}
 }
 
+// normalizeRecorderPath returns a stable path key for maps and rollback.
+// Relative and absolute paths that refer to the same file should collide here.
+func normalizeRecorderPath(path string) string {
+	clean := filepath.Clean(path)
+	if abs, err := filepath.Abs(clean); err == nil {
+		return filepath.Clean(abs)
+	}
+	return clean
+}
+
 // BeforeWrite saves the existing file at path to the recorder's backup
 // directory before it is overwritten. If the file does not exist, it is
 // recorded as a created file. If the file is a directory, it is ignored.
 func (r *Recorder) BeforeWrite(path string) error {
+	path = normalizeRecorderPath(path)
 	info, err := os.Stat(path)
 	if os.IsNotExist(err) {
 		r.created = append(r.created, path)
@@ -77,7 +88,7 @@ func (r *Recorder) BeforeWrite(path string) error {
 // step (did not exist before). This is useful when the creation was detected
 // externally rather than through BeforeWrite.
 func (r *Recorder) RecordCreated(path string) {
-	r.created = append(r.created, path)
+	r.created = append(r.created, normalizeRecorderPath(path))
 }
 
 // Rollback restores all modified files from their backups and removes all
@@ -116,7 +127,14 @@ func (r *Recorder) Commit() error {
 }
 
 // copyFile copies src to dst, creating parent directories as needed.
+// File permission bits from src are applied to dst after copy (best-effort).
 func copyFile(src, dst string) error {
+	info, err := os.Stat(src)
+	if err != nil {
+		return err
+	}
+	mode := info.Mode()
+
 	if err := os.MkdirAll(filepath.Dir(dst), 0o755); err != nil {
 		return err
 	}
@@ -135,7 +153,10 @@ func copyFile(src, dst string) error {
 		_ = out.Close()
 		return err
 	}
-	return out.Close()
+	if err := out.Close(); err != nil {
+		return err
+	}
+	return os.Chmod(dst, mode.Perm())
 }
 
 // hashPath returns a stable, filesystem-safe identifier for path.

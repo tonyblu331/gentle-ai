@@ -543,6 +543,7 @@ migrate_engram_data() {
 
     mkdir -p "$target" || fatal "Cannot create target directory: ${target}"
 
+    # Must match engram SQLite filenames in internal/components/engram/filesystem_backend.go
     local files=("engram.db" "engram.db-wal" "engram.db-shm")
     local to_remove=()
 

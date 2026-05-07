@@ -29,6 +29,69 @@ func RemoveEngramEnv() error {
 	return removeUnix()
 }
 
+// stripEngramDataDirLines removes lines that set ENGRAM_DATA_DIR in bash/zsh or fish.
+func stripEngramDataDirLines(lines []string) []string {
+	var filtered []string
+	for _, line := range lines {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "export ENGRAM_DATA_DIR=") ||
+			strings.HasPrefix(trimmed, "set -gx ENGRAM_DATA_DIR") {
+			continue
+		}
+		filtered = append(filtered, line)
+	}
+	return filtered
+}
+
+// unixAtomicReplaceProfile writes content to target by creating a temp file in the
+// same directory and renaming it into place. If backupExisting is true and target
+// already exists, target is renamed to target+".bak" before the replace; on full
+// success the backup file is removed.
+func unixAtomicReplaceProfile(target, content string, backupExisting bool) error {
+	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
+		return fmt.Errorf("create profile directory: %w", err)
+	}
+
+	tmp, err := os.CreateTemp(filepath.Dir(target), ".profile-*")
+	if err != nil {
+		return fmt.Errorf("create temp profile: %w", err)
+	}
+	tmpPath := tmp.Name()
+
+	if _, err := tmp.WriteString(content); err != nil {
+		tmp.Close()
+		os.Remove(tmpPath)
+		return fmt.Errorf("write temp profile: %w", err)
+	}
+	if err := tmp.Close(); err != nil {
+		os.Remove(tmpPath)
+		return fmt.Errorf("close temp profile: %w", err)
+	}
+
+	bakPath := target + ".bak"
+	if backupExisting {
+		if _, err := os.Stat(target); err == nil {
+			if err := os.Rename(target, bakPath); err != nil {
+				os.Remove(tmpPath)
+				return fmt.Errorf("backup profile: %w", err)
+			}
+		}
+	}
+
+	if err := os.Rename(tmpPath, target); err != nil {
+		if backupExisting {
+			_ = os.Rename(bakPath, target)
+		}
+		os.Remove(tmpPath)
+		return fmt.Errorf("replace profile: %w", err)
+	}
+
+	if backupExisting {
+		_ = os.Remove(bakPath)
+	}
+	return nil
+}
+
 // ---------------------------------------------------------------------------
 // Unix implementation
 // ---------------------------------------------------------------------------
@@ -51,30 +114,14 @@ func persistUnix(dir string) error {
 		target = profiles[0]
 	}
 
-	// Ensure parent directory exists.
-	if err := os.MkdirAll(filepath.Dir(target), 0o755); err != nil {
-		return fmt.Errorf("create profile directory: %w", err)
-	}
-
-	// Read existing content.
 	var existing []byte
 	if _, err := os.Stat(target); err == nil {
 		existing, _ = os.ReadFile(target)
 	}
 
-	// Filter out old ENGRAM_DATA_DIR lines.
 	lines := strings.Split(string(existing), "\n")
-	var filtered []string
-	for _, line := range lines {
-		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, "export ENGRAM_DATA_DIR=") ||
-			strings.HasPrefix(trimmed, "set -gx ENGRAM_DATA_DIR") {
-			continue
-		}
-		filtered = append(filtered, line)
-	}
+	filtered := stripEngramDataDirLines(lines)
 
-	// Append new entry.
 	shell := detectShell()
 	var entry string
 	if shell == "fish" {
@@ -84,36 +131,8 @@ func persistUnix(dir string) error {
 	}
 	filtered = append(filtered, "", "# Engram data directory (set by gentle-ai)", entry)
 
-	// Atomic write via temp file.
-	tmp, err := os.CreateTemp(filepath.Dir(target), ".profile-*")
-	if err != nil {
-		return fmt.Errorf("create temp profile: %w", err)
-	}
-
 	content := strings.Join(filtered, "\n") + "\n"
-	if _, err := tmp.WriteString(content); err != nil {
-		tmp.Close()
-		os.Remove(tmp.Name())
-		return fmt.Errorf("write temp profile: %w", err)
-	}
-	if err := tmp.Close(); err != nil {
-		os.Remove(tmp.Name())
-		return fmt.Errorf("close temp profile: %w", err)
-	}
-
-	// Backup original before replacing.
-	if _, err := os.Stat(target); err == nil {
-		_ = os.Rename(target, target+".bak")
-	}
-
-	if err := os.Rename(tmp.Name(), target); err != nil {
-		os.Remove(tmp.Name())
-		// Attempt to restore backup.
-		_ = os.Rename(target+".bak", target)
-		return fmt.Errorf("replace profile: %w", err)
-	}
-
-	return nil
+	return unixAtomicReplaceProfile(target, content, true)
 }
 
 func removeUnix() error {
@@ -130,44 +149,22 @@ func removeUnix() error {
 		}
 
 		lines := strings.Split(string(data), "\n")
-		var filtered []string
-		for _, line := range lines {
-			trimmed := strings.TrimSpace(line)
-			if strings.HasPrefix(trimmed, "export ENGRAM_DATA_DIR=") ||
-				strings.HasPrefix(trimmed, "set -gx ENGRAM_DATA_DIR") {
-				continue
-			}
-			filtered = append(filtered, line)
+		filtered := stripEngramDataDirLines(lines)
+
+		if len(filtered) == len(lines) {
+			continue
 		}
 
-		// Only rewrite if something was removed.
-		if len(filtered) != len(lines) {
-			tmp, err := os.CreateTemp(filepath.Dir(target), ".profile-*")
-			if err != nil {
-				return fmt.Errorf("create temp profile: %w", err)
-			}
+		content := strings.Join(filtered, "\n")
+		if !strings.HasSuffix(content, "\n") {
+			content += "\n"
+		}
 
-			content := strings.Join(filtered, "\n")
-			if !strings.HasSuffix(content, "\n") {
-				content += "\n"
+		if err := unixAtomicReplaceProfile(target, content, false); err != nil {
+			if firstErr == nil {
+				firstErr = fmt.Errorf("replace profile %q: %w", target, err)
 			}
-			if _, err := tmp.WriteString(content); err != nil {
-				tmp.Close()
-				os.Remove(tmp.Name())
-				return fmt.Errorf("write temp profile: %w", err)
-			}
-			if err := tmp.Close(); err != nil {
-				os.Remove(tmp.Name())
-				return fmt.Errorf("close temp profile: %w", err)
-			}
-
-			if err := os.Rename(tmp.Name(), target); err != nil {
-				os.Remove(tmp.Name())
-				if firstErr == nil {
-					firstErr = fmt.Errorf("replace profile %q: %w", target, err)
-				}
-				continue
-			}
+			continue
 		}
 	}
 	return firstErr

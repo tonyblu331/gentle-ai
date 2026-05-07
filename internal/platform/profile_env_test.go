@@ -95,6 +95,29 @@ func TestRemoveEngramEnv_RemovesFromProfile(t *testing.T) {
 	}
 }
 
+func TestPersistEngramEnv_RemovesBakAfterSuccess(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("Unix-only test")
+	}
+
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	t.Setenv("SHELL", "/bin/bash")
+
+	profile := filepath.Join(home, ".bashrc")
+	_ = os.WriteFile(profile, []byte("# existing\n"), 0o644)
+
+	err := PersistEngramEnv("/data/engram")
+	if err != nil {
+		t.Fatalf("PersistEngramEnv: %v", err)
+	}
+
+	bak := profile + ".bak"
+	if _, err := os.Stat(bak); err == nil {
+		t.Errorf("expected backup file %s to be removed after successful persist", bak)
+	}
+}
+
 func TestPersistEngramEnv_FishFormat(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Unix-only test")

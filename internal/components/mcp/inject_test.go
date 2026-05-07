@@ -3,6 +3,7 @@ package mcp
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -158,7 +159,11 @@ func TestInjectCodexTOMLStrategyIsSkipped(t *testing.T) {
 
 func TestInjectVSCodeWritesContext7ToMCPConfigFile(t *testing.T) {
 	home := t.TempDir()
-	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	} else {
+		t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
+	}
 	adapter := vscode.NewAdapter()
 
 	first, err := Inject(home, adapter)

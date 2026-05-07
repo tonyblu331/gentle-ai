@@ -275,7 +275,7 @@ type runtimeState struct {
 }
 
 func newInstallRuntime(homeDir string, selection model.Selection, resolved planner.ResolvedPlan, profile system.PlatformProfile) (*installRuntime, error) {
-	backupRoot := filepath.Join(homeDir, ".gentle-ai", "backups")
+	backupRoot := backup.BackupRootForHome(homeDir)
 	if err := os.MkdirAll(backupRoot, 0o755); err != nil {
 		return nil, fmt.Errorf("create backup root directory %q: %w", backupRoot, err)
 	}
@@ -572,29 +572,14 @@ func (s *componentApplyStep) Run() error {
 	case model.ComponentEngram:
 		backend := engram.NewLocalDataBackend()
 
-		// Resolve the effective Engram data directory.
-		dataDir := s.selection.EngramDataDir
-		if dataDir == "" {
-			dataDir = backend.DefaultDataDir()
-		}
-
-		// Move existing data when explicitly requested.
 		operation := s.selection.EngramDataDirOperation
 		if operation == "" && s.selection.EngramMigrateData {
 			operation = model.EngramDataDirOperationMove
 		}
-		pendingMoveSource := ""
-		if operation == model.EngramDataDirOperationMove && s.selection.EngramDataDir != "" {
-			srcDir := engram.EffectiveSourceDataDir(backend)
-			if filepath.Clean(srcDir) != filepath.Clean(s.selection.EngramDataDir) && backend.DetectExistingData(srcDir) {
-				if locked, _ := backend.DetectLockedData(srcDir); locked {
-					return fmt.Errorf("move engram data: engram data appears to be in use. Close any running engram processes and try again")
-				}
-				if _, err := backend.CopyData(srcDir, s.selection.EngramDataDir); err != nil {
-					return fmt.Errorf("move engram data: %w", err)
-				}
-				pendingMoveSource = srcDir
-			}
+
+		dataDir := s.selection.EngramDataDir
+		if dataDir == "" {
+			dataDir = backend.DefaultDataDir()
 		}
 
 		if _, err := cmdLookPath("engram"); err != nil {
@@ -638,33 +623,53 @@ func (s *componentApplyStep) Run() error {
 		setupStrict := engram.ParseSetupStrict(os.Getenv(engram.SetupStrictEnvVar))
 		attemptedSlugs := make(map[string]struct{}, len(adapters))
 
-		// Wrap engram binary invocations so ENGRAM_DATA_DIR is scoped to this
-		// component step only, avoiding global process side effects.
-		if err := withEngramEnv(dataDir, func() error {
-			for _, adapter := range adapters {
-				if engram.ShouldAttemptSetup(setupMode, adapter.Agent()) {
-					slug, _ := engram.SetupAgentSlug(adapter.Agent())
-					if _, seen := attemptedSlugs[slug]; !seen {
-						if err := runCommand("engram", "setup", slug); err != nil {
-							if setupStrict {
-								return fmt.Errorf("engram setup for %q: %w", adapter.Agent(), err)
+		runSetupAndInject := func(targetDataDir string) error {
+			return withEngramEnv(targetDataDir, func() error {
+				for _, adapter := range adapters {
+					if engram.ShouldAttemptSetup(setupMode, adapter.Agent()) {
+						slug, _ := engram.SetupAgentSlug(adapter.Agent())
+						if _, seen := attemptedSlugs[slug]; !seen {
+							if err := runCommand("engram", "setup", slug); err != nil {
+								if setupStrict {
+									return fmt.Errorf("engram setup for %q: %w", adapter.Agent(), err)
+								}
 							}
+							attemptedSlugs[slug] = struct{}{}
 						}
-						attemptedSlugs[slug] = struct{}{}
+					}
+					if _, err := engram.InjectWithOptions(s.homeDir, adapter, engram.InjectOptions{DataDir: targetDataDir}); err != nil {
+						return fmt.Errorf("inject engram for %q: %w", adapter.Agent(), err)
 					}
 				}
-				if _, err := engram.InjectWithOptions(s.homeDir, adapter, engram.InjectOptions{DataDir: dataDir}); err != nil {
-					return fmt.Errorf("inject engram for %q: %w", adapter.Agent(), err)
-				}
+				return nil
+			})
+		}
+
+		// When moving data, use DataDirService so copy → persist → inject → delete source
+		// matches the TUI path and cannot drift from the CLI hand-rolled sequence.
+		moveNeeded := operation == model.EngramDataDirOperationMove && s.selection.EngramDataDir != ""
+		srcDir := engram.EffectiveSourceDataDir(backend)
+		moveEligible := moveNeeded &&
+			filepath.Clean(srcDir) != filepath.Clean(s.selection.EngramDataDir) &&
+			backend.DetectExistingData(srcDir)
+
+		if moveEligible {
+			if locked, _ := backend.DetectLockedData(srcDir); locked {
+				return fmt.Errorf("move engram data: engram data appears to be in use. Close any running engram processes and try again")
+			}
+			persister := engram.NewLocalConfigPersister(s.homeDir)
+			svc := engram.NewDataDirService(backend, persister)
+			svc.SetAfterConfigPersist(func(_ engram.Action, target string) error {
+				return runSetupAndInject(target)
+			})
+			if _, err := svc.Execute(engram.ActionMigrate, s.selection.EngramDataDir); err != nil {
+				return fmt.Errorf("move engram data: %w", err)
 			}
 			return nil
-		}); err != nil {
-			return err
 		}
-		if pendingMoveSource != "" {
-			if _, err := backend.DeleteData(pendingMoveSource); err != nil {
-				return fmt.Errorf("move engram data cleanup: %w", err)
-			}
+
+		if err := runSetupAndInject(dataDir); err != nil {
+			return err
 		}
 		return nil
 	case model.ComponentContext7:
@@ -822,7 +827,7 @@ func windowsGoCandidates() []string {
 // BuildRealStagePlan creates a StagePlan with real backup, agent install, and component apply steps.
 // It is used by both the CLI and TUI paths.
 func BuildRealStagePlan(homeDir string, selection model.Selection, resolved planner.ResolvedPlan, profile system.PlatformProfile) (pipeline.StagePlan, error) {
-	backupRoot := filepath.Join(homeDir, ".gentle-ai", "backups")
+	backupRoot := backup.BackupRootForHome(homeDir)
 	if err := os.MkdirAll(backupRoot, 0o755); err != nil {
 		return pipeline.StagePlan{}, fmt.Errorf("create backup root directory %q: %w", backupRoot, err)
 	}
@@ -981,6 +986,7 @@ func backupTargets(homeDir string, selection model.Selection, resolved planner.R
 
 func componentPaths(homeDir string, selection model.Selection, adapters []agents.Adapter, component model.ComponentID) []string {
 	paths := []string{}
+	var engramDataDirSnapshotted bool
 	for _, adapter := range adapters {
 		switch component {
 		case model.ComponentEngram:
@@ -1007,6 +1013,18 @@ func componentPaths(homeDir string, selection model.Selection, adapters []agents
 			}
 			if adapter.SystemPromptStrategy() == model.StrategyMarkdownSections {
 				paths = append(paths, adapter.SystemPromptFile(homeDir))
+			}
+			if !engramDataDirSnapshotted {
+				eff := backup.EffectiveDataDir(homeDir)
+				if eff != "" {
+					if fi, err := os.Stat(eff); err == nil && fi.IsDir() {
+						be := engram.NewLocalDataBackend()
+						for _, base := range be.ExistingFiles(eff) {
+							paths = append(paths, filepath.Join(eff, base))
+						}
+					}
+				}
+				engramDataDirSnapshotted = true
 			}
 		case model.ComponentSDD:
 			// Jinja modular hubs (e.g. Kimi KIMI.md) are appended once below so SDD+Persona

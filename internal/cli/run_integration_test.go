@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"testing"
@@ -1371,7 +1372,7 @@ func TestRunInstallDryRunMatchesActualInstallOpenCodeSDDMulti(t *testing.T) {
 		t.Fatalf("expected DryRun=true in result, got false")
 	}
 
-	home := t.TempDir()
+	home := cliIntegrationHome(t)
 	adapters := resolveAdapters(dryResult.Resolved.Agents)
 	var expectedPaths []string
 	for _, component := range dryResult.Resolved.OrderedComponents {
@@ -1815,7 +1816,7 @@ func TestRunInstallCustomPresetExplicitComponentsResolveCorrectly(t *testing.T) 
 // Engram + SDD selected together and verifies that the final AGENTS.md
 // contains all three sections with no duplicates.
 func TestOpenCodePersonaBeforeSDDPreservesAllSections(t *testing.T) {
-	home := t.TempDir()
+	home := cliIntegrationHome(t)
 	restoreHome := osUserHomeDir
 	restoreCommand := runCommand
 	restoreLookPath := cmdLookPath
@@ -1943,6 +1944,9 @@ func TestRunInstallKimiBootstrapsHub(t *testing.T) {
 }
 
 func TestRunInstallKimiMissingUVFailsBeforeExecutingInstallCommands(t *testing.T) {
+	if runtime.GOOS != "darwin" {
+		t.Skip("Kimi uv preflight is only asserted for macOS detection result")
+	}
 	home := t.TempDir()
 	restoreHome := osUserHomeDir
 	restoreCommand := runCommand

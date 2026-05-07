@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/gentleman-programming/gentle-ai/internal/system"
+	"github.com/gentleman-programming/gentle-ai/internal/testutil"
 )
 
 // --- TestDetectInstalledVersion ---
@@ -45,7 +46,7 @@ func TestDetectInstalledVersion(t *testing.T) {
 				return "/usr/local/bin/engram", nil
 			},
 			execCommandFn: func(name string, args ...string) *exec.Cmd {
-				return exec.Command("echo", "engram v0.3.2")
+				return testutil.StubEcho("engram v0.3.2")
 			},
 			wantVersion: "0.3.2",
 		},
@@ -56,7 +57,7 @@ func TestDetectInstalledVersion(t *testing.T) {
 				return "/usr/local/bin/engram", nil
 			},
 			execCommandFn: func(name string, args ...string) *exec.Cmd {
-				return exec.Command("echo", "engram dev")
+				return testutil.StubEcho("engram dev")
 			},
 			wantVersion: "dev",
 		},
@@ -75,7 +76,7 @@ func TestDetectInstalledVersion(t *testing.T) {
 				return "/usr/local/bin/engram", nil
 			},
 			execCommandFn: func(name string, args ...string) *exec.Cmd {
-				return exec.Command("false") // exits with error
+				return testutil.StubExit1()
 			},
 			wantVersion: "",
 		},
@@ -86,7 +87,7 @@ func TestDetectInstalledVersion(t *testing.T) {
 				return "/usr/local/bin/gga", nil
 			},
 			execCommandFn: func(name string, args ...string) *exec.Cmd {
-				return exec.Command("echo", "gga - no version info")
+				return testutil.StubEcho("gga - no version info")
 			},
 			wantVersion: "",
 		},
@@ -443,9 +444,9 @@ func TestCheckAll(t *testing.T) {
 	}
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "engram" {
-			return exec.Command("echo", "engram v0.3.2")
+			return testutil.StubEcho("engram v0.3.2")
 		}
-		return exec.Command("false")
+		return testutil.StubExit1()
 	}
 	pluginHome := t.TempDir()
 	userHomeDir = func() (string, error) { return pluginHome, nil }
@@ -496,7 +497,7 @@ func TestCheckAll_NetworkError(t *testing.T) {
 	httpClient.Transport = &testTransport{server: server}
 
 	lookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
-	execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("false") }
+	execCommand = func(name string, args ...string) *exec.Cmd { return testutil.StubExit1() }
 
 	profile := system.PlatformProfile{OS: "linux", LinuxDistro: "ubuntu", PackageManager: "apt", Supported: true}
 	results := CheckAll(context.Background(), "1.0.0", profile)
@@ -542,7 +543,7 @@ func TestCheckFiltered_FetchErrorPreservesCheckFailedForMissingTool(t *testing.T
 	httpClient = server.Client()
 	httpClient.Transport = &testTransport{server: server}
 	lookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
-	execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("false") }
+	execCommand = func(name string, args ...string) *exec.Cmd { return testutil.StubExit1() }
 
 	profile := system.PlatformProfile{OS: "darwin", PackageManager: "brew", Supported: true}
 	results := CheckFiltered(context.Background(), "1.0.0", profile, []string{"engram"})
@@ -834,7 +835,7 @@ func TestCheckAll_DevVersion(t *testing.T) {
 	Tools = []ToolInfo{Tools[0]}
 
 	lookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
-	execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("false") }
+	execCommand = func(name string, args ...string) *exec.Cmd { return testutil.StubExit1() }
 
 	profile := system.PlatformProfile{OS: "darwin", PackageManager: "brew", Supported: true}
 	results := CheckAll(context.Background(), "dev", profile)
@@ -880,9 +881,9 @@ func TestCheckFiltered_SubsetOfTools(t *testing.T) {
 	}
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "engram" {
-			return exec.Command("echo", "engram v0.9.9")
+			return testutil.StubEcho("engram v0.9.9")
 		}
-		return exec.Command("false")
+		return testutil.StubExit1()
 	}
 
 	profile := system.PlatformProfile{OS: "darwin", PackageManager: "brew", Supported: true}
@@ -918,7 +919,7 @@ func TestCheckFiltered_EmptyFilter(t *testing.T) {
 	httpClient = server.Client()
 	httpClient.Transport = &testTransport{server: server}
 	lookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
-	execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("false") }
+	execCommand = func(name string, args ...string) *exec.Cmd { return testutil.StubExit1() }
 
 	profile := system.PlatformProfile{OS: "darwin", PackageManager: "brew", Supported: true}
 
@@ -951,7 +952,7 @@ func TestCheckFiltered_UnknownToolIgnored(t *testing.T) {
 	httpClient = server.Client()
 	httpClient.Transport = &testTransport{server: server}
 	lookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
-	execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("false") }
+	execCommand = func(name string, args ...string) *exec.Cmd { return testutil.StubExit1() }
 
 	profile := system.PlatformProfile{OS: "darwin", PackageManager: "brew", Supported: true}
 
@@ -990,7 +991,7 @@ func TestCheckFiltered_DevBuildSemanticsForGentleAI(t *testing.T) {
 	httpClient = server.Client()
 	httpClient.Transport = &testTransport{server: server}
 	lookPath = func(string) (string, error) { return "", fmt.Errorf("not found") }
-	execCommand = func(name string, args ...string) *exec.Cmd { return exec.Command("false") }
+	execCommand = func(name string, args ...string) *exec.Cmd { return testutil.StubExit1() }
 	Tools = []ToolInfo{Tools[0]} // gentle-ai only
 
 	profile := system.PlatformProfile{OS: "darwin", PackageManager: "brew", Supported: true}
@@ -1055,9 +1056,9 @@ func TestCheckFiltered_DevBuildSkipNotEligible(t *testing.T) {
 	}
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "engram" {
-			return exec.Command("echo", "engram v1.0.0")
+			return testutil.StubEcho("engram v1.0.0")
 		}
-		return exec.Command("false")
+		return testutil.StubExit1()
 	}
 	// Only gentle-ai and engram for this test
 	Tools = []ToolInfo{Tools[0], Tools[1]}
@@ -1123,9 +1124,9 @@ func TestNoUpdatesPath(t *testing.T) {
 	}
 	execCommand = func(name string, args ...string) *exec.Cmd {
 		if name == "engram" {
-			return exec.Command("echo", "engram v0.3.2")
+			return testutil.StubEcho("engram v0.3.2")
 		}
-		return exec.Command("false")
+		return testutil.StubExit1()
 	}
 	// Only engram and gga for this test (skip gentle-ai to avoid dev-build behavior)
 	Tools = []ToolInfo{Tools[1], Tools[2]}

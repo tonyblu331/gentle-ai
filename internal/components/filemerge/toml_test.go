@@ -121,14 +121,18 @@ func TestUpsertCodexEngramBlockWindowsPath(t *testing.T) {
 }
 
 func TestUpsertCodexEngramBlock_WithEnv(t *testing.T) {
-	env := map[string]string{"ENGRAM_DATA_DIR": "/mnt/data/Engram"}
-	result := UpsertCodexEngramBlock("", "", env)
-
-	if !strings.Contains(result, `ENGRAM_DATA_DIR = "/mnt/data/Engram"`) {
-		t.Fatalf("result missing ENGRAM_DATA_DIR env var; got:\n%s", result)
+	env := map[string]string{
+		"ZZ_LAST": "z", "ENGRAM_DATA_DIR": "/mnt/data/Engram", "AA_FIRST": "a",
 	}
-	if !strings.Contains(result, `[mcp_servers.engram]`) {
-		t.Fatalf("result missing [mcp_servers.engram]; got:\n%s", result)
+	result := UpsertCodexEngramBlock("", "", env)
+	if !strings.Contains(result, `ENGRAM_DATA_DIR = "/mnt/data/Engram"`) || !strings.Contains(result, `[mcp_servers.engram]`) {
+		t.Fatalf("unexpected output:\n%s", result)
+	}
+	idxAA := strings.Index(result, "AA_FIRST")
+	idxEN := strings.Index(result, "ENGRAM_DATA_DIR")
+	idxZZ := strings.Index(result, "ZZ_LAST")
+	if !(idxAA > 0 && idxEN > 0 && idxZZ > 0 && idxAA < idxEN && idxEN < idxZZ) {
+		t.Fatalf("env keys must appear sorted AA_FIRST < ENGRAM_DATA_DIR < ZZ_LAST; got:\n%s", result)
 	}
 }
 
@@ -181,6 +185,22 @@ command = "engram"
 	count := strings.Count(result, "model_instructions_file")
 	if count != 1 {
 		t.Fatalf("expected 1 model_instructions_file, got %d; result:\n%s", count, result)
+	}
+}
+
+func TestUpsertTopLevelTOMLString_NoPrefixCollision(t *testing.T) {
+	input := `model_instructions_file = "/keep/me.md"
+
+[mcp_servers.engram]
+command = "engram"
+`
+	result := UpsertTopLevelTOMLString(input, "model", "gpt-4o")
+
+	if !strings.Contains(result, `model_instructions_file = "/keep/me.md"`) {
+		t.Fatalf("must not strip model_instructions_file when updating model; got:\n%s", result)
+	}
+	if !strings.Contains(result, `model = "gpt-4o"`) {
+		t.Fatalf("missing model key; got:\n%s", result)
 	}
 }
 

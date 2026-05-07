@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strconv"
 	"strings"
 	"testing"
@@ -32,6 +33,22 @@ func mockNoPackageManager(t *testing.T) {
 		return "", fmt.Errorf("not found")
 	}
 	t.Cleanup(func() { npmLookPath = orig })
+}
+
+// tempHomeWithUNGStub returns a temp dir with node_modules/unique-names-generator
+// pre-created so OpenCode plugin install skips real bun/npm (CI / Windows-safe).
+func tempHomeWithUNGStub(t *testing.T) string {
+	t.Helper()
+	home := t.TempDir()
+	if runtime.GOOS == "windows" {
+		t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+		t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+	}
+	p := filepath.Join(home, ".config", "opencode", "node_modules", "unique-names-generator")
+	if err := os.MkdirAll(p, 0o755); err != nil {
+		t.Fatalf("tempHomeWithUNGStub: %v", err)
+	}
+	return home
 }
 
 func TestInjectClaudeWritesSectionMarkers(t *testing.T) {
@@ -227,7 +244,7 @@ func TestInjectClaudeCustomModelAssignmentsIsIdempotent(t *testing.T) {
 }
 
 func TestInjectOpenCodeWritesCommandFiles(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	result, err := Inject(home, opencodeAdapter(), "")
 	if err != nil {
@@ -286,7 +303,7 @@ func TestInjectOpenCodeWritesCommandFiles(t *testing.T) {
 }
 
 func TestInjectOpenCodeIsIdempotent(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	first, err := Inject(home, opencodeAdapter(), "")
 	if err != nil {
@@ -646,7 +663,7 @@ func TestInjectOpenCodeOverwritesOrchestratorPromptByDefault(t *testing.T) {
 }
 
 func TestInjectOpenCodeMigratesLegacyAgentsKey(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	settingsPath := filepath.Join(home, ".config", "opencode", "opencode.json")
 	if err := os.MkdirAll(filepath.Dir(settingsPath), 0o755); err != nil {
@@ -1153,7 +1170,7 @@ You are a COORDINATOR, not an executor.
 }
 
 func TestInjectOpenCodeMultiMode(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	result, err := Inject(home, opencodeAdapter(), "multi")
 	if err != nil {
@@ -1247,7 +1264,7 @@ func TestInjectOpenCodeMultiMode(t *testing.T) {
 }
 
 func TestInjectOpenCodeMultiModeIdempotent(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	first, err := Inject(home, opencodeAdapter(), "multi")
 	if err != nil {
@@ -1335,7 +1352,7 @@ func TestInjectOpenCodeSubagentPromptsStayExecutorScoped(t *testing.T) {
 }
 
 func TestInjectOpenCodeEmptySDDModeDefaultsSingle(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	result, err := Inject(home, opencodeAdapter(), "")
 	if err != nil {
@@ -1439,7 +1456,7 @@ func TestInjectClaudeIgnoresSDDMode(t *testing.T) {
 }
 
 func TestInjectOpenCodeSingleToMultiSwitch(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	// First: inject single mode.
 	_, err := Inject(home, opencodeAdapter(), "single")
@@ -2048,7 +2065,7 @@ func TestInjectOpenCodeMultiModeExistingAgentWithNoModelIsNotTouched(t *testing.
 // actually written to the agent's skills/_shared/ directory during Inject().
 // This is a disk-level test; assets_test.go only checks the embedded FS.
 func TestInjectWritesAllFourSharedFilesToDisk(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	result, err := Inject(home, opencodeAdapter(), "")
 	if err != nil {
@@ -2095,7 +2112,7 @@ func TestInjectWritesAllFourSharedFilesToDisk(t *testing.T) {
 // TestInjectSharedDirCreatedWithAllFiles verifies that Inject() creates the
 // _shared directory when it does not exist and writes all four files into it.
 func TestInjectSharedDirCreatedWithAllFiles(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	// Sanity: _shared dir must not exist yet.
 	sharedDir := filepath.Join(home, ".config", "opencode", "skills", "_shared")
@@ -2303,7 +2320,7 @@ func TestInjectStrictTDDIsIdempotent(t *testing.T) {
 // Specifically, sdd-apply/strict-tdd.md and sdd-verify/strict-tdd-verify.md
 // must be written to disk alongside their SKILL.md files.
 func TestInjectCopiesAllFilesFromSkillDirectory(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	result, err := Inject(home, opencodeAdapter(), "")
 	if err != nil {
@@ -2341,7 +2358,7 @@ func TestInjectCopiesAllFilesFromSkillDirectory(t *testing.T) {
 // TestInjectCopiesAllFilesReportedInResult verifies that all skill files
 // (including extra files beyond SKILL.md) are included in result.Files.
 func TestInjectCopiesAllFilesReportedInResult(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	result, err := Inject(home, opencodeAdapter(), "")
 	if err != nil {
@@ -2532,7 +2549,7 @@ func TestInjectClaudeDoesNotStripMarkedSection(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestInjectOpenCodeMultiWritesPlugin(t *testing.T) {
-	home := t.TempDir()
+	home := tempHomeWithUNGStub(t)
 
 	result, err := Inject(home, opencodeAdapter(), "multi")
 	if err != nil {

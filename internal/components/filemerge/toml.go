@@ -2,6 +2,7 @@ package filemerge
 
 import (
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -31,9 +32,17 @@ func UpsertCodexEngramBlock(content, engramCmd string, env map[string]string) st
 	b.WriteString("[mcp_servers.engram]\n")
 	b.WriteString("command = \"" + escapedCmd + "\"\n")
 	b.WriteString("args = [\"mcp\", \"--tools=agent\"]\n")
-	for k, v := range env {
-		escapedV := strings.ReplaceAll(v, `\`, `\\`)
-		b.WriteString(k + " = \"" + escapedV + "\"\n")
+	if len(env) > 0 {
+		keys := make([]string, 0, len(env))
+		for k := range env {
+			keys = append(keys, k)
+		}
+		sort.Strings(keys)
+		for _, k := range keys {
+			v := env[k]
+			escapedV := strings.ReplaceAll(v, `\`, `\\`)
+			b.WriteString(k + " = \"" + escapedV + "\"\n")
+		}
 	}
 	// Remove trailing newline — the caller adds it.
 	codexEngramBlock := strings.TrimSuffix(b.String(), "\n")
@@ -80,11 +89,11 @@ func UpsertTopLevelTOMLString(content, key, value string) string {
 	lines := strings.Split(content, "\n")
 	lineValue := fmt.Sprintf("%s = %q", key, value)
 
-	// Remove all existing occurrences of the key.
+	// Remove all existing occurrences of the key (exact top-level key token, not prefix).
 	var cleaned []string
 	for _, line := range lines {
 		trimmed := strings.TrimSpace(line)
-		if strings.HasPrefix(trimmed, key+" ") || strings.HasPrefix(trimmed, key+"=") {
+		if topLevelTOMLKey(trimmed) == key {
 			continue
 		}
 		cleaned = append(cleaned, line)
@@ -106,4 +115,20 @@ func UpsertTopLevelTOMLString(content, key, value string) string {
 	out = append(out, cleaned[insertAt:]...)
 
 	return strings.TrimSpace(strings.Join(out, "\n")) + "\n"
+}
+
+// topLevelTOMLKey returns the key name for a single-line `key = value` assignment,
+// or empty if the line is not that shape (e.g. section header or comment).
+func topLevelTOMLKey(trimmed string) string {
+	if trimmed == "" || strings.HasPrefix(trimmed, "#") {
+		return ""
+	}
+	if strings.HasPrefix(trimmed, "[") && strings.HasSuffix(trimmed, "]") {
+		return ""
+	}
+	eq := strings.IndexByte(trimmed, '=')
+	if eq <= 0 {
+		return ""
+	}
+	return strings.TrimSpace(trimmed[:eq])
 }

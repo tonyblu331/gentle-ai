@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"runtime"
 	"testing"
 
 	"github.com/gentleman-programming/gentle-ai/internal/model"
@@ -251,6 +252,17 @@ func TestConfigRootsForBackup_NilSafeOnEmptyRegistry(t *testing.T) {
 	}
 }
 
+// isolateWindowsAppConfigRoots scopes %APPDATA% under home on Windows so host
+// agent installs (e.g. kiro-ide under real Roaming) do not affect discovery.
+func isolateWindowsAppConfigRoots(t *testing.T, home string) {
+	t.Helper()
+	if runtime.GOOS != "windows" {
+		return
+	}
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
+	t.Setenv("LOCALAPPDATA", filepath.Join(home, "AppData", "Local"))
+}
+
 // ─── Integration: DefaultRegistry ────────────────────────────────────────
 
 // TestDiscoverInstalled_WithDefaultRegistryAndRealFS verifies that DiscoverInstalled
@@ -258,6 +270,7 @@ func TestConfigRootsForBackup_NilSafeOnEmptyRegistry(t *testing.T) {
 // Only agents whose config dirs are created are returned.
 func TestDiscoverInstalled_WithDefaultRegistryAndRealFS(t *testing.T) {
 	home := t.TempDir()
+	isolateWindowsAppConfigRoots(t, home)
 
 	// Create claude-code config dir only.
 	claudeDir := filepath.Join(home, ".claude")
@@ -288,6 +301,7 @@ func TestDiscoverInstalled_WithDefaultRegistryAndRealFS(t *testing.T) {
 // ConfigRootsForBackup returns exactly the dirs created on disk.
 func TestConfigRootsForBackup_WithDefaultRegistryCoversCreatedDirs(t *testing.T) {
 	home := t.TempDir()
+	isolateWindowsAppConfigRoots(t, home)
 
 	// Create two agent config dirs.
 	dirs := []string{

@@ -6,6 +6,8 @@ import (
 	"fmt"
 )
 
+// MergeJSONObjects merges overlay onto base (pretty-printed JSON + newline).
+// Malformed base becomes {} after JSONC normalization; malformed overlay errors.
 func MergeJSONObjects(baseJSON []byte, overlayJSON []byte) ([]byte, error) {
 	base, err := unmarshalJSONObject(baseJSON)
 	if err != nil {

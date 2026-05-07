@@ -13,8 +13,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gentleman-programming/gentle-ai/internal/backup"
 	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
-	"github.com/gentleman-programming/gentle-ai/internal/state"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
 	"github.com/gentleman-programming/gentle-ai/internal/update"
 )
@@ -366,12 +366,13 @@ func engramBinaryUpgrade(profile system.PlatformProfile) error {
 		// Non-fatal: the binary was downloaded successfully. Warn and continue.
 		fmt.Fprintf(os.Stderr, "WARNING: could not add %s to PATH: %v\n", binDir, err)
 	}
-	// Ensure ENGRAM_DATA_DIR is set so the upgraded binary uses the same data location.
-	if dir := os.Getenv(engram.DataDirEnvVar); dir == "" {
-		homeDir, _ := os.UserHomeDir()
-		if homeDir != "" {
-			if s, err := state.Read(homeDir); err == nil && s.EngramDataDir != "" {
-				_ = os.Setenv(engram.DataDirEnvVar, s.EngramDataDir)
+	// Ensure ENGRAM_DATA_DIR matches EffectiveDataDir resolution when unset so the
+	// upgraded binary uses the same data location as backups and install state.
+	if os.Getenv(engram.DataDirEnvVar) == "" {
+		if homeDir, err := os.UserHomeDir(); err == nil && homeDir != "" {
+			effective := backup.EffectiveDataDir(homeDir)
+			if effective != "" {
+				_ = os.Setenv(engram.DataDirEnvVar, effective)
 			}
 		}
 	}

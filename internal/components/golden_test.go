@@ -1,6 +1,7 @@
 package components_test
 
 import (
+	"bytes"
 	"encoding/json"
 	"flag"
 	"os"
@@ -901,9 +902,12 @@ func assertGolden(t *testing.T, name string, actual []byte) {
 		t.Fatalf("ReadFile(%q) error = %v\n\nRun with -update to generate golden files:\n  go test ./internal/components/ -run %s -update", goldenPath, err, t.Name())
 	}
 
-	if string(actual) != string(expected) {
-		// Show first difference for easier debugging.
-		diffIdx := firstDiffIndex(string(expected), string(actual))
+	actualN := bytes.ReplaceAll(actual, []byte("\r\n"), []byte("\n"))
+	expectedN := bytes.ReplaceAll(expected, []byte("\r\n"), []byte("\n"))
+	if string(actualN) != string(expectedN) {
+		expStr := string(expectedN)
+		actStr := string(actualN)
+		diffIdx := firstDiffIndex(expStr, actStr)
 		context := 80
 		start := diffIdx - context
 		if start < 0 {
@@ -912,8 +916,8 @@ func assertGolden(t *testing.T, name string, actual []byte) {
 
 		t.Fatalf("golden mismatch for %s (first diff at byte %d)\n\nexpected[%d:%d]:\n%s\n\nactual[%d:%d]:\n%s\n\nRun with -update to regenerate:\n  go test ./internal/components/ -run %s -update",
 			name, diffIdx,
-			start, min(diffIdx+context, len(string(expected))), string(expected)[start:min(diffIdx+context, len(string(expected)))],
-			start, min(diffIdx+context, len(string(actual))), string(actual)[start:min(diffIdx+context, len(string(actual)))],
+			start, min(diffIdx+context, len(expStr)), expStr[start:min(diffIdx+context, len(expStr))],
+			start, min(diffIdx+context, len(actStr)), actStr[start:min(diffIdx+context, len(actStr))],
 			t.Name(),
 		)
 	}

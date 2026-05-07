@@ -353,6 +353,7 @@ function Move-EngramData {
         New-Item -ItemType Directory -Path $Target -Force | Out-Null
     }
 
+    # Must match engram SQLite filenames in internal/components/engram/filesystem_backend.go
     $files = @("engram.db", "engram.db-wal", "engram.db-shm")
     $toRemove = @()
 

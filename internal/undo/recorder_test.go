@@ -3,6 +3,7 @@ package undo
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -201,7 +202,7 @@ func TestRecorderRollbackReportsErrors(t *testing.T) {
 	}
 
 	// Delete the backup to force a rollback error.
-	backupPath := rec.modified[origPath]
+	backupPath := rec.modified[normalizeRecorderPath(origPath)]
 	if err := os.Remove(backupPath); err != nil {
 		t.Fatalf("Remove backup: %v", err)
 	}
@@ -212,5 +213,43 @@ func TestRecorderRollbackReportsErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "error(s)") {
 		t.Errorf("error = %q, want error count message", err.Error())
+	}
+}
+
+func TestNormalizeRecorderPathEquivalentForms(t *testing.T) {
+	dir := t.TempDir()
+	a := normalizeRecorderPath(filepath.Join(dir, "nested", "file.json"))
+	b := normalizeRecorderPath(filepath.Join(dir, "nested", "..", "nested", "file.json"))
+	if a != b {
+		t.Fatalf("normalizeRecorderPath: %q vs %q", a, b)
+	}
+}
+
+func TestRecorderRollbackPreservesFileMode(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("permission bits differ on Windows")
+	}
+	dir := t.TempDir()
+	undoDir := filepath.Join(dir, "undo")
+	origPath := filepath.Join(dir, "tool.sh")
+	if err := os.WriteFile(origPath, []byte("#!/bin/sh\necho\n"), 0o755); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	rec := NewRecorder(undoDir)
+	if err := rec.BeforeWrite(origPath); err != nil {
+		t.Fatalf("BeforeWrite: %v", err)
+	}
+	if err := os.WriteFile(origPath, []byte("x"), 0o644); err != nil {
+		t.Fatalf("WriteFile: %v", err)
+	}
+	if err := rec.Rollback(); err != nil {
+		t.Fatalf("Rollback: %v", err)
+	}
+	info, err := os.Stat(origPath)
+	if err != nil {
+		t.Fatalf("Stat: %v", err)
+	}
+	if info.Mode().Perm()&0o111 == 0 {
+		t.Errorf("expected executable bits preserved, got perm %v", info.Mode().Perm())
 	}
 }
