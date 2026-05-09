@@ -98,7 +98,7 @@ func RunArgs(args []string, stdout io.Writer) error {
 		m := tui.NewModel(result, Version)
 		m.EngramDataDir = engramDataDir
 		m.HomeDir = homeDir
-		m.EngramDetected = engramIsPresent(homeDir)
+		m.EngramDetected = engramIsPresent(homeDir, engramDataDir)
 		m.EngramDataDirFn = buildEngramDataDirFn(homeDir)
 		m.ExecuteFn = tuiExecute
 		m.RestoreFn = tuiRestore
@@ -482,63 +482,82 @@ func modelAssignmentsToState(m map[string]model.ModelAssignment) map[string]stat
 }
 
 // engramIsPresent reports whether the Engram data directory or binary appears to
-// be installed. Used to gate the "Manage Engram directory" menu item on Welcome.
-func engramIsPresent(homeDir string) bool {
-	dataDir := engram.DefaultDir(homeDir)
-	if _, err := os.Stat(dataDir); err == nil {
-		return true
+// be installed. persistedDataDir is the path from state.json (may be empty).
+// Used to gate the "Manage Engram directory" menu item on Welcome.
+func engramIsPresent(homeDir, persistedDataDir string) bool {
+	defaultDir := filepath.Clean(engram.DefaultDir(homeDir))
+	candidates := []string{defaultDir}
+	if persistedDataDir != "" {
+		custom := filepath.Clean(filepath.FromSlash(persistedDataDir))
+		if custom != defaultDir {
+			candidates = append(candidates, custom)
+		}
 	}
-	// Also treat presence of the binary (anywhere in PATH) as "installed".
+	for _, dir := range candidates {
+		if fi, err := os.Stat(dir); err == nil && fi.IsDir() {
+			return true
+		}
+	}
 	if _, err := exec.LookPath("engram"); err == nil {
 		return true
 	}
 	return false
 }
 
+func persistEngramDataDir(homeDir, dir string) error {
+	current, err := state.Read(homeDir)
+	if err != nil {
+		current = state.InstallState{}
+	}
+	current.EngramDataDir = dir
+	return state.Write(homeDir, current)
+}
+
 // buildEngramDataDirFn returns a closure that executes an Engram data-directory
-// operation (copy, move, delete, fresh-start) and persists the resulting directory
-// path to state.json so the next startup picks it up correctly.
+// operation (copy, move, delete, fresh-start) and persists state when the active
+// directory reference changes.
+//
+// Copy does not change persisted EngramDataDir (avoids wiping a custom path).
+// Move copies first, persists the destination, then removes the source — so a
+// failed persist leaves both directories intact.
 func buildEngramDataDirFn(homeDir string) func(op model.EngramDataDirOp, currentDir, dstDir string) (snapshotID string, err error) {
 	return func(op model.EngramDataDirOp, currentDir, dstDir string) (string, error) {
 		svc := engram.NewDataDirService(homeDir)
 
-		var snapID string
-		var opErr error
-
 		switch op {
 		case model.EngramDataDirOpCopy:
 			manifest, err := svc.CopyTo(currentDir, dstDir)
-			snapID, opErr = manifest.ID, err
+			return manifest.ID, err
+
 		case model.EngramDataDirOpMove:
-			manifest, err := svc.MoveTo(currentDir, dstDir)
-			snapID, opErr = manifest.ID, err
+			manifest, err := svc.CopyTo(currentDir, dstDir)
+			if err != nil {
+				return manifest.ID, err
+			}
+			if err := persistEngramDataDir(homeDir, dstDir); err != nil {
+				return manifest.ID, fmt.Errorf("persist engram data dir: %w", err)
+			}
+			if err := engram.RemoveSQLiteArtifacts(currentDir); err != nil {
+				return manifest.ID, fmt.Errorf("remove source after move: %w", err)
+			}
+			return manifest.ID, nil
+
 		case model.EngramDataDirOpDelete, model.EngramDataDirOpFresh:
 			manifest, err := svc.Delete(currentDir)
-			snapID, opErr = manifest.ID, err
+			if err != nil {
+				return manifest.ID, err
+			}
+			if err := persistEngramDataDir(homeDir, ""); err != nil {
+				return manifest.ID, fmt.Errorf("persist engram data dir reset: %w", err)
+			}
+			return manifest.ID, nil
+
 		case model.EngramDataDirOpKeep:
 			return "", nil
+
 		default:
 			return "", fmt.Errorf("unknown op: %q", op)
 		}
-
-		if opErr != nil {
-			return snapID, opErr
-		}
-
-		// Persist the new data directory reference to state.json.
-		var newDir string
-		switch op {
-		case model.EngramDataDirOpMove:
-			newDir = dstDir
-		case model.EngramDataDirOpDelete, model.EngramDataDirOpFresh:
-			newDir = "" // reset to default (~/.engram)
-		// Copy leaves the current dir unchanged; Keep already returned above.
-		}
-		current, _ := state.Read(homeDir) // ignore not-exist; treat as empty
-		current.EngramDataDir = newDir
-		_ = state.Write(homeDir, current) // non-fatal: a failed write must not fail the op
-
-		return snapID, nil
 	}
 }
 

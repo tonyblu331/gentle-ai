@@ -4,12 +4,14 @@ import (
 	"bytes"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/gentleman-programming/gentle-ai/internal/backup"
+	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
 	"github.com/gentleman-programming/gentle-ai/internal/state"
 )
@@ -547,5 +549,82 @@ func TestUnknownCommandSuggestsHelp(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "gentle-ai help") {
 		t.Error("unknown command error should suggest 'gentle-ai help'")
+	}
+}
+
+func TestEngramIsPresent_PersistedCustomDir(t *testing.T) {
+	if _, err := exec.LookPath("engram"); err == nil {
+		t.Skip("engram in PATH makes presence detection unconditional")
+	}
+	home := t.TempDir()
+	custom := filepath.Join(home, "custom-engram")
+	if err := os.MkdirAll(custom, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if !engramIsPresent(home, custom) {
+		t.Fatal("expected persisted custom directory to be detected")
+	}
+}
+
+func TestBuildEngramDataDirFn_CopyPreservesPersistedDir(t *testing.T) {
+	home := t.TempDir()
+	src := filepath.Join(home, "src-data")
+	dst := filepath.Join(home, "dst-data")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engram.DBPath(src), []byte("fake-db"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Write(home, state.InstallState{EngramDataDir: src}); err != nil {
+		t.Fatal(err)
+	}
+
+	fn := buildEngramDataDirFn(home)
+	if _, err := fn(model.EngramDataDirOpCopy, src, dst); err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+	s, err := state.Read(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(s.EngramDataDir) != filepath.Clean(src) {
+		t.Fatalf("EngramDataDir = %q after copy, want %q", s.EngramDataDir, src)
+	}
+}
+
+func TestBuildEngramDataDirFn_MovePersistsDestinationAndRemovesSource(t *testing.T) {
+	home := t.TempDir()
+	src := filepath.Join(home, "src-data")
+	dst := filepath.Join(home, "dst-data")
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engram.DBPath(src), []byte("fake-db"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engram.DBPath(src)+"-wal", []byte("wal"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := state.Write(home, state.InstallState{EngramDataDir: src}); err != nil {
+		t.Fatal(err)
+	}
+
+	fn := buildEngramDataDirFn(home)
+	if _, err := fn(model.EngramDataDirOpMove, src, dst); err != nil {
+		t.Fatalf("move: %v", err)
+	}
+	s, err := state.Read(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if filepath.Clean(s.EngramDataDir) != filepath.Clean(dst) {
+		t.Fatalf("EngramDataDir = %q, want %q", s.EngramDataDir, dst)
+	}
+	if _, err := os.Stat(engram.DBPath(src)); !os.IsNotExist(err) {
+		t.Error("source DB should be removed after move")
+	}
+	if _, statErr := os.Stat(engram.DBPath(dst)); statErr != nil {
+		t.Fatalf("destination DB: %v", statErr)
 	}
 }

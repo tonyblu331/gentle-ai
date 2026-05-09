@@ -33,67 +33,79 @@ func NewDataDirService(homeDir string) DataDirService {
 	}
 }
 
-// CopyTo copies the Engram DB from currentDir to dst without removing the source.
-// A snapshot of the source DB is created first. Returns the snapshot manifest.
+// CopyTo copies all SQLite artifacts from currentDir to dst without removing the source.
+// A snapshot of existing source files is created first. Returns the snapshot manifest.
 func (s DataDirService) CopyTo(currentDir, dst string) (backup.Manifest, error) {
-	srcDB := DBPath(currentDir)
-	snap, err := s.snapshot(srcDB)
+	paths := SQLiteArtifactPaths(currentDir)
+	snap, err := s.snapshot(paths)
 	if err != nil {
 		return backup.Manifest{}, fmt.Errorf("snapshot before copy: %w", err)
 	}
-	if err := CopyDB(srcDB, DBPath(dst)); err != nil {
+	if err := CopySQLiteArtifacts(currentDir, dst); err != nil {
 		return snap, fmt.Errorf("copy: %w", err)
 	}
 	return snap, nil
 }
 
-// MoveTo copies the Engram DB from currentDir to dst, then removes the source DB.
-// The source is only removed after the copy is verified. Returns the snapshot manifest.
+// MoveTo copies all SQLite artifacts from currentDir to dst, then removes every
+// artifact from the source directory. The source is only removed after the copy succeeds.
 func (s DataDirService) MoveTo(currentDir, dst string) (backup.Manifest, error) {
 	snap, err := s.CopyTo(currentDir, dst)
 	if err != nil {
 		return snap, err
 	}
-	if err := os.Remove(DBPath(currentDir)); err != nil && !os.IsNotExist(err) {
+	if err := RemoveSQLiteArtifacts(currentDir); err != nil {
 		return snap, fmt.Errorf("remove source after move: %w", err)
 	}
 	return snap, nil
 }
 
-// Delete creates a snapshot of the current DB, then removes it.
+// Delete creates a snapshot of existing SQLite files, then removes every artifact.
 // Returns the snapshot manifest so the caller can show the backup ID.
 func (s DataDirService) Delete(dataDir string) (backup.Manifest, error) {
-	dbPath := DBPath(dataDir)
-	snap, err := s.snapshot(dbPath)
+	paths := SQLiteArtifactPaths(dataDir)
+	snap, err := s.snapshot(paths)
 	if err != nil {
 		return backup.Manifest{}, fmt.Errorf("snapshot before delete: %w", err)
 	}
-	if err := os.Remove(dbPath); err != nil && !os.IsNotExist(err) {
+	if err := RemoveSQLiteArtifacts(dataDir); err != nil {
 		return snap, fmt.Errorf("delete: %w", err)
 	}
 	return snap, nil
 }
 
-// DiskSpaceOK reports whether the volume at dst has enough free space to hold
-// a copy of the DB at srcDB. Returns (ok, needed bytes, available bytes, error).
-func (s DataDirService) DiskSpaceOK(srcDB, dst string) (bool, int64, int64, error) {
-	info, err := os.Stat(srcDB)
+// DiskSpaceOK reports whether the volume probed by dstProbePath has enough free
+// space to hold a copy of all existing SQLite artifacts under srcDataDir.
+// Returns (ok, needed bytes, available bytes, error).
+func (s DataDirService) DiskSpaceOK(srcDataDir, dstProbePath string) (bool, int64, int64, error) {
+	paths, err := ExistingSQLiteArtifacts(srcDataDir)
 	if err != nil {
-		return false, 0, 0, fmt.Errorf("stat source DB %q: %w", srcDB, err)
+		return false, 0, 0, err
 	}
-	avail, err := storage.AvailableBytes(dst)
+	if len(paths) == 0 {
+		return false, 0, 0, fmt.Errorf("no sqlite artifacts under %q", srcDataDir)
+	}
+	var needed int64
+	for _, p := range paths {
+		info, err := os.Stat(p)
+		if err != nil {
+			return false, 0, 0, fmt.Errorf("stat source artifact %q: %w", p, err)
+		}
+		needed += info.Size()
+	}
+	avail, err := storage.AvailableBytes(dstProbePath)
 	if err != nil {
-		return false, 0, 0, fmt.Errorf("check available space at %q: %w", dst, err)
+		return false, 0, 0, fmt.Errorf("check available space at %q: %w", dstProbePath, err)
 	}
-	needed := info.Size()
 	return avail > needed, needed, avail, nil
 }
 
-// snapshot creates a timestamped backup of dbPath under the backup root.
-func (s DataDirService) snapshot(dbPath string) (backup.Manifest, error) {
+// snapshot creates a timestamped backup of the given paths under the backup root.
+// Missing paths are recorded in the manifest but omitted from the archive (see backup.Snapshotter).
+func (s DataDirService) snapshot(paths []string) (backup.Manifest, error) {
 	if err := os.MkdirAll(s.backupRoot, 0o755); err != nil {
 		return backup.Manifest{}, fmt.Errorf("create backup root %q: %w", s.backupRoot, err)
 	}
 	snapshotDir := filepath.Join(s.backupRoot, time.Now().UTC().Format("20060102150405.000000000"))
-	return s.snapshotter.Create(snapshotDir, []string{dbPath})
+	return s.snapshotter.Create(snapshotDir, paths)
 }

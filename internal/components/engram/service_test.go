@@ -71,19 +71,53 @@ func TestDataDirService_MoveTo(t *testing.T) {
 	src := filepath.Join(home, "src-data")
 	dst := filepath.Join(home, "dst-data")
 	writeTestDB(t, src)
+	walSrc := DBPath(src) + "-wal"
+	if err := os.WriteFile(walSrc, []byte("wal-chunk"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 
 	_, err := svc.MoveTo(src, dst)
 	if err != nil {
 		t.Fatalf("MoveTo: %v", err)
 	}
 
-	// Source must be gone.
+	// Source must be gone (including WAL sidecar).
 	if _, err := os.Stat(DBPath(src)); !os.IsNotExist(err) {
 		t.Error("source DB should not exist after MoveTo")
+	}
+	if _, err := os.Stat(walSrc); !os.IsNotExist(err) {
+		t.Error("source WAL should not exist after MoveTo")
 	}
 	// Destination must exist.
 	if _, err := os.Stat(DBPath(dst)); err != nil {
 		t.Errorf("dst DB not created: %v", err)
+	}
+	walDst := DBPath(dst) + "-wal"
+	if _, err := os.Stat(walDst); err != nil {
+		t.Errorf("dst WAL not created: %v", err)
+	}
+}
+
+func TestDataDirService_CopyTo_CopiesWAL(t *testing.T) {
+	svc, home := newTestService(t)
+	src := filepath.Join(home, "src-data")
+	dst := filepath.Join(home, "dst-data")
+	writeTestDB(t, src)
+	walSrc := DBPath(src) + "-wal"
+	if err := os.WriteFile(walSrc, []byte("wal-body"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := svc.CopyTo(src, dst); err != nil {
+		t.Fatalf("CopyTo: %v", err)
+	}
+	walDst := DBPath(dst) + "-wal"
+	body, err := os.ReadFile(walDst)
+	if err != nil {
+		t.Fatalf("read dst WAL: %v", err)
+	}
+	if string(body) != "wal-body" {
+		t.Errorf("WAL content = %q, want wal-body", string(body))
 	}
 }
 
@@ -141,9 +175,9 @@ func TestDataDirService_SnapshotError_Propagates(t *testing.T) {
 func TestDataDirService_DiskSpaceOK(t *testing.T) {
 	svc, home := newTestService(t)
 	dir := filepath.Join(home, "data")
-	dbPath := writeTestDB(t, dir)
+	writeTestDB(t, dir)
 
-	ok, needed, avail, err := svc.DiskSpaceOK(dbPath, home)
+	ok, needed, avail, err := svc.DiskSpaceOK(dir, home)
 	if err != nil {
 		t.Fatalf("DiskSpaceOK: %v", err)
 	}

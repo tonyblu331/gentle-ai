@@ -304,8 +304,9 @@ func injectCore(configHomeDir, promptDir string, adapter agents.Adapter, opts In
 		}
 		engramCmd := stableEngramCommandForMergedConfig(configPath, adapter.Agent())
 		withMCP := filemerge.UpsertCodexEngramBlock(existing, engramCmd)
-		withInstr := filemerge.UpsertTopLevelTOMLString(withMCP, "model_instructions_file", instructionsPath)
-		withCompact := filemerge.UpsertTopLevelTOMLString(withInstr, "experimental_compact_prompt_file", compactPath)
+		// Forward slashes keep Codex config portable and avoid Windows-specific escape surprises in %q TOML strings.
+		withInstr := filemerge.UpsertTopLevelTOMLString(withMCP, "model_instructions_file", filepath.ToSlash(instructionsPath))
+		withCompact := filemerge.UpsertTopLevelTOMLString(withInstr, "experimental_compact_prompt_file", filepath.ToSlash(compactPath))
 
 		tomlWrite, err := filemerge.WriteFileAtomic(configPath, []byte(withCompact), 0o644)
 		if err != nil {
@@ -423,9 +424,9 @@ func ensureAntigravitySettings(homeDir string, adapter agents.Adapter) (settings
 // writeCodexInstructionFiles writes the Engram memory protocol and compact prompt
 // files to ~/.codex/ and returns their paths.
 func writeCodexInstructionFiles(homeDir string) (instructionsPath, compactPath string, err error) {
-	codexDir := homeDir + "/.codex"
-	instructionsPath = codexDir + "/engram-instructions.md"
-	compactPath = codexDir + "/engram-compact-prompt.md"
+	codexDir := filepath.Join(homeDir, ".codex")
+	instructionsPath = filepath.Join(codexDir, "engram-instructions.md")
+	compactPath = filepath.Join(codexDir, "engram-compact-prompt.md")
 
 	instrContent := assets.MustRead("codex/engram-instructions.md")
 	instrWrite, err := filemerge.WriteFileAtomic(instructionsPath, []byte(instrContent), 0o644)
@@ -441,7 +442,9 @@ func writeCodexInstructionFiles(homeDir string) (instructionsPath, compactPath s
 	}
 	_ = compactWrite
 
-	return instructionsPath, compactPath, nil
+	// Use slash-separated paths in returned strings so merged TOML matches tests and
+	// stays stable across OS (same behavior as historical string concat paths).
+	return filepath.ToSlash(instructionsPath), filepath.ToSlash(compactPath), nil
 }
 
 func mergeJSONFile(path string, overlay []byte) (filemerge.WriteResult, error) {

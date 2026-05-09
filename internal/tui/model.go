@@ -569,7 +569,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case model.EngramDataDirOpDelete, model.EngramDataDirOpFresh:
 				// Data was removed — reset to default (~/.engram).
 				m.EngramDataDir = ""
-			// Copy and Keep leave the current directory unchanged.
+				// Copy and Keep leave the current directory unchanged.
 			}
 		}
 		m.setScreen(ScreenEngramDataDirResult)
@@ -3286,14 +3286,9 @@ func (m Model) resolvedEngramDir() string {
 	return engram.DefaultDir(m.HomeDir)
 }
 
-// engramDBSize returns the file size of the current Engram DB, or 0 on error.
+// engramDBSize returns the total size of SQLite artifacts (db + wal + shm), or 0.
 func (m Model) engramDBSize() int64 {
-	dbPath := engram.DBPath(m.resolvedEngramDir())
-	info, err := os.Stat(dbPath)
-	if err != nil {
-		return 0
-	}
-	return info.Size()
+	return engram.TotalSQLiteArtifactSize(m.resolvedEngramDir())
 }
 
 // hasDetectedOpenCode returns true if OpenCode config directory was detected.
