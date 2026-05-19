@@ -485,6 +485,7 @@ func TestInjectCursorWithMalformedMCPJsonRecovery(t *testing.T) {
 
 func TestInjectVSCodeMergesEngramToMCPConfigFile(t *testing.T) {
 	home := t.TempDir()
+	t.Setenv("APPDATA", filepath.Join(home, "AppData", "Roaming"))
 	t.Setenv("XDG_CONFIG_HOME", filepath.Join(home, ".config"))
 	adapter := vscode.NewAdapter()
 
@@ -668,7 +669,7 @@ func TestInjectCodexWritesInstructionFiles(t *testing.T) {
 		t.Fatalf("Inject(codex) error = %v", err)
 	}
 
-	instructionsPath := filepath.Join(home, ".codex", "engram-instructions.md")
+	instructionsPath := filepath.ToSlash(filepath.Join(home, ".codex", "engram-instructions.md"))
 	content, err := os.ReadFile(instructionsPath)
 	if err != nil {
 		t.Fatalf("ReadFile(engram-instructions.md) error = %v", err)
@@ -677,7 +678,7 @@ func TestInjectCodexWritesInstructionFiles(t *testing.T) {
 		t.Fatal("engram-instructions.md missing expected content (mem_save)")
 	}
 
-	compactPath := filepath.Join(home, ".codex", "engram-compact-prompt.md")
+	compactPath := filepath.ToSlash(filepath.Join(home, ".codex", "engram-compact-prompt.md"))
 	compactContent, err := os.ReadFile(compactPath)
 	if err != nil {
 		t.Fatalf("ReadFile(engram-compact-prompt.md) error = %v", err)
@@ -702,7 +703,7 @@ func TestInjectCodexInjectsTOMLKeys(t *testing.T) {
 	}
 	text := string(content)
 
-	instructionsPath := filepath.Join(home, ".codex", "engram-instructions.md")
+	instructionsPath := filepath.ToSlash(filepath.Join(home, ".codex", "engram-instructions.md"))
 	if !strings.Contains(text, `model_instructions_file`) {
 		t.Fatalf("config.toml missing model_instructions_file key; got:\n%s", text)
 	}
@@ -710,7 +711,7 @@ func TestInjectCodexInjectsTOMLKeys(t *testing.T) {
 		t.Fatalf("config.toml model_instructions_file does not reference %q; got:\n%s", instructionsPath, text)
 	}
 
-	compactPath := filepath.Join(home, ".codex", "engram-compact-prompt.md")
+	compactPath := filepath.ToSlash(filepath.Join(home, ".codex", "engram-compact-prompt.md"))
 	if !strings.Contains(text, `experimental_compact_prompt_file`) {
 		t.Fatalf("config.toml missing experimental_compact_prompt_file key; got:\n%s", text)
 	}
