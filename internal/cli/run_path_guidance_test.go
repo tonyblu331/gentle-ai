@@ -27,9 +27,8 @@ func TestEngramPathGuidanceZsh(t *testing.T) {
 
 func TestEngramPathGuidanceDefault(t *testing.T) {
 	msg := engramPathGuidance("")
-	want := filepath.Join("go", "bin")
-	if !strings.Contains(msg, want) {
-		t.Fatalf("engramPathGuidance(default) missing %q: %s", want, msg)
+	if want := "go/bin"; !strings.Contains(filepath.ToSlash(msg), want) {
+		t.Fatalf("engramPathGuidance(default) missing %q: %s", want, filepath.ToSlash(msg))
 	}
 }
 
@@ -89,9 +88,8 @@ func TestWithGoInstallPathNoteAddsNoteWhenNotInPATH(t *testing.T) {
 	if !strings.Contains(updated.FinalNote, "go install") {
 		t.Fatalf("FinalNote should contain go install guidance, got: %q", updated.FinalNote)
 	}
-	want := filepath.Join("go", "bin")
-	if !strings.Contains(updated.FinalNote, want) {
-		t.Fatalf("FinalNote should reference %s dir, got: %q", want, updated.FinalNote)
+	if !strings.Contains(filepath.ToSlash(updated.FinalNote), "go/bin") {
+		t.Fatalf("FinalNote should reference go/bin dir, got: %q", filepath.ToSlash(updated.FinalNote))
 	}
 }
 
