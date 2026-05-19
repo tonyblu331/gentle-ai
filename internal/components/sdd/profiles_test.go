@@ -556,7 +556,7 @@ func TestGenerateProfileOverlay_SubAgentFileRefs(t *testing.T) {
 		key := phase + "-cheap"
 		agent := agentMap[key].(map[string]any)
 		prompt, _ := agent["prompt"].(string)
-		expectedRef := "{file:" + filepath.Join(promptDir, phase+".md") + "}"
+		expectedRef := "{file:" + filepath.ToSlash(filepath.Join(promptDir, phase+".md")) + "}"
 		if prompt != expectedRef {
 			t.Errorf("sub-agent %q prompt = %q, want %q", key, prompt, expectedRef)
 		}
