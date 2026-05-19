@@ -1169,6 +1169,10 @@ func installOpenCodePlugins(homeDir string, adapter agents.Adapter) (InjectionRe
 // package manager is found (soft skip), or (true, error) with a descriptive,
 // actionable message if a package manager was found but the install failed.
 func runPkgInstall(dir, pkg string) (ran bool, err error) {
+	if os.Getenv("GENTLE_AI_SKIP_OPENCODE_PLUGIN_INSTALL") == "1" {
+		return false, nil
+	}
+
 	// Prefer bun — OpenCode ships with bun.lock and recommends bun.
 	if bunPath, lookErr := npmLookPath("bun"); lookErr == nil {
 		out, runErr := npmRun(dir, bunPath, "add", pkg)
