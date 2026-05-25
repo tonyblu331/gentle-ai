@@ -46,12 +46,13 @@ type InstallResult struct {
 }
 
 var (
-	osUserHomeDir       = os.UserHomeDir
-	osSetenv            = os.Setenv
-	osStat              = os.Stat
-	runCommand          = executeCommand
-	cmdLookPath         = exec.LookPath
-	streamCommandOutput = true
+	osUserHomeDir                    = defaultUserHomeDir
+	osSetenv                         = os.Setenv
+	osStat                           = os.Stat
+	runCommand                       = executeCommand
+	cmdLookPath                      = exec.LookPath
+	streamCommandOutput              = true
+	skipOpenCodePluginPackageInstall bool
 
 	// ggaAvailableCheck is an optional override for ggaAvailable behavior.
 	// When set, it is called instead of the default filesystem check.
@@ -67,6 +68,13 @@ var (
 	// Default "dev" matches the ldflags default in app.Version.
 	AppVersion = "dev"
 )
+
+func defaultUserHomeDir() (string, error) {
+	if home := os.Getenv("HOME"); home != "" {
+		return home, nil
+	}
+	return os.UserHomeDir()
+}
 
 // SetCommandOutputStreaming toggles whether command stdout/stderr is streamed
 // directly to the terminal. It returns a restore function.
@@ -606,11 +614,12 @@ func (s componentApplyStep) Run() error {
 		for _, adapter := range adapters {
 			targetDir := componentInjectionDir(s.homeDir, s.workspaceDir, adapter)
 			opts := sdd.InjectOptions{
-				OpenCodeModelAssignments: s.selection.ModelAssignments,
-				ClaudeModelAssignments:   s.selection.ClaudeModelAssignments,
-				KiroModelAssignments:     s.selection.KiroModelAssignments,
-				WorkspaceDir:             s.workspaceDir,
-				StrictTDD:                s.selection.StrictTDD,
+				OpenCodeModelAssignments:         s.selection.ModelAssignments,
+				ClaudeModelAssignments:           s.selection.ClaudeModelAssignments,
+				KiroModelAssignments:             s.selection.KiroModelAssignments,
+				WorkspaceDir:                     s.workspaceDir,
+				StrictTDD:                        s.selection.StrictTDD,
+				SkipOpenCodePluginPackageInstall: skipOpenCodePluginPackageInstall,
 			}
 			if _, err := sdd.Inject(targetDir, adapter, s.selection.SDDMode, opts); err != nil {
 				return fmt.Errorf("inject sdd for %q: %w", adapter.Agent(), err)
