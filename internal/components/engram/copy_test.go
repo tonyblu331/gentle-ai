@@ -143,3 +143,24 @@ func TestCopyDB_RejectsSQLiteSidecars(t *testing.T) {
 		t.Fatalf("dst should not exist after sidecar rejection, stat err = %v", statErr)
 	}
 }
+
+func TestCopyDBWithProgress_ReportsBytes(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "engram.db")
+	dst := filepath.Join(t.TempDir(), "engram.db")
+	content := []byte("progress-visible sqlite copy")
+
+	if err := os.WriteFile(src, content, 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	var last CopyProgress
+	if err := CopyDBWithProgress(src, dst, func(progress CopyProgress) {
+		last = progress
+	}); err != nil {
+		t.Fatalf("CopyDBWithProgress: %v", err)
+	}
+
+	if last.Written != int64(len(content)) || last.Total != int64(len(content)) {
+		t.Fatalf("last progress = %+v, want %d/%d", last, len(content), len(content))
+	}
+}

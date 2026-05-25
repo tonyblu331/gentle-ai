@@ -592,18 +592,18 @@ func engramIsPresent(homeDir string) bool {
 	return false
 }
 
-func buildEngramDataDirFn(homeDir string) func(op model.EngramDataDirOp, currentDir, dstDir string) (snapshotID string, err error) {
-	return func(op model.EngramDataDirOp, currentDir, dstDir string) (string, error) {
+func buildEngramDataDirFn(homeDir string) func(op model.EngramDataDirOp, currentDir, dstDir string, onProgress func(written, total int64)) (snapshotID string, err error) {
+	return func(op model.EngramDataDirOp, currentDir, dstDir string, onProgress func(written, total int64)) (string, error) {
 		svc := engram.NewDataDirService(homeDir)
 		var snapID string
 		var opErr error
 
 		switch op {
 		case model.EngramDataDirOpCopy:
-			manifest, err := svc.CopyTo(currentDir, dstDir)
+			manifest, err := svc.CopyToWithProgress(currentDir, dstDir, onProgress)
 			snapID, opErr = manifest.ID, err
 		case model.EngramDataDirOpMove:
-			manifest, err := svc.MoveTo(currentDir, dstDir)
+			manifest, err := svc.MoveToWithProgress(currentDir, dstDir, onProgress)
 			snapID, opErr = manifest.ID, err
 		case model.EngramDataDirOpSet:
 			opErr = nil

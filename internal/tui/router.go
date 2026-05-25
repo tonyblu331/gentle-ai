@@ -46,6 +46,7 @@ var linearRoutes = map[Screen]Route{
 	ScreenEngramDataDir:           {Backward: ScreenWelcome},
 	ScreenEngramDataDirCustomPath: {Backward: ScreenEngramDataDir},
 	ScreenEngramDataDirConfirm:    {Backward: ScreenEngramDataDir},
+	ScreenEngramDataDirProgress:   {},
 	ScreenEngramDataDirResult:     {Backward: ScreenEngramDataDir},
 	ScreenUninstallMode:           {Backward: ScreenWelcome},
 	ScreenUninstall:               {Backward: ScreenUninstallMode},

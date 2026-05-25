@@ -7,6 +7,7 @@ import (
 
 	"github.com/gentleman-programming/gentle-ai/internal/components/engram"
 	"github.com/gentleman-programming/gentle-ai/internal/model"
+	"github.com/gentleman-programming/gentle-ai/internal/storage"
 	"github.com/gentleman-programming/gentle-ai/internal/tui/styles"
 )
 
@@ -156,6 +157,23 @@ func RenderEngramDataDirConfirm(op model.EngramDataDirOp, currentDir, dstDir, ba
 	return b.String()
 }
 
+func RenderEngramDataDirProgress(op model.EngramDataDirOp, currentDir, dstDir string, written, total int64, spinner string) string {
+	percent := progressPercent(written, total)
+	var b strings.Builder
+	b.WriteString(styles.TitleStyle.Render(engramOpVerb(op)))
+	if spinner != "" {
+		b.WriteString(" " + styles.WarningStyle.Render(spinner))
+	}
+	b.WriteString("\n\n")
+	b.WriteString(fmt.Sprintf("  %s\n    -> %s\n\n", styles.SubtextStyle.Render(currentDir), styles.SubtextStyle.Render(dstDir)))
+	b.WriteString(renderEngramProgressBar(percent))
+	b.WriteString(" ")
+	b.WriteString(styles.PercentStyle.Render(fmt.Sprintf("%d%%", percent)))
+	b.WriteString("\n")
+	b.WriteString(styles.SubtextStyle.Render(fmt.Sprintf("%s / %s", storage.FormatBytes(written), storage.FormatBytes(total))))
+	return b.String()
+}
+
 func RenderEngramDataDirResult(op model.EngramDataDirOp, snapshotID, backupRoot string, err error) string {
 	if err != nil {
 		return styles.ErrorStyle.Render(engramOpVerb(op)+" failed") + "\n\n" + styles.WarningStyle.Render(err.Error())
@@ -182,6 +200,26 @@ func renderPathInput(path string, pos int) string {
 		pos = len(runes)
 	}
 	return styles.SelectedStyle.Render("[" + string(runes[:pos]) + "|" + string(runes[pos:]) + "]")
+}
+
+func progressPercent(written, total int64) int {
+	if total <= 0 {
+		return 0
+	}
+	if written < 0 {
+		written = 0
+	}
+	if written > total {
+		written = total
+	}
+	return int((written * 100) / total)
+}
+
+func renderEngramProgressBar(percent int) string {
+	width := 24
+	filled := width * percent / 100
+	return styles.ProgressFilled.Render(strings.Repeat("█", filled)) +
+		styles.ProgressEmpty.Render(strings.Repeat("░", width-filled))
 }
 
 func EngramDirOpNeedsLocation(op model.EngramDataDirOp) bool {

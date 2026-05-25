@@ -32,12 +32,20 @@ func NewDataDirService(homeDir string) DataDirService {
 
 // CopyTo snapshots the current DB, then copies it to dst.
 func (s DataDirService) CopyTo(currentDir, dst string) (backup.Manifest, error) {
+	return s.CopyToWithProgress(currentDir, dst, nil)
+}
+
+func (s DataDirService) CopyToWithProgress(currentDir, dst string, onProgress func(written, total int64)) (backup.Manifest, error) {
 	srcDB := DBPath(currentDir)
 	snap, err := s.snapshot(srcDB)
 	if err != nil {
 		return backup.Manifest{}, fmt.Errorf("snapshot before copy: %w", err)
 	}
-	if err := CopyDB(srcDB, DBPath(dst)); err != nil {
+	if err := CopyDBWithProgress(srcDB, DBPath(dst), func(p CopyProgress) {
+		if onProgress != nil {
+			onProgress(p.Written, p.Total)
+		}
+	}); err != nil {
 		return snap, fmt.Errorf("copy: %w", err)
 	}
 	return snap, nil
@@ -45,7 +53,11 @@ func (s DataDirService) CopyTo(currentDir, dst string) (backup.Manifest, error) 
 
 // MoveTo snapshots the current DB, copies it to dst, then removes the source.
 func (s DataDirService) MoveTo(currentDir, dst string) (backup.Manifest, error) {
-	snap, err := s.CopyTo(currentDir, dst)
+	return s.MoveToWithProgress(currentDir, dst, nil)
+}
+
+func (s DataDirService) MoveToWithProgress(currentDir, dst string, onProgress func(written, total int64)) (backup.Manifest, error) {
+	snap, err := s.CopyToWithProgress(currentDir, dst, onProgress)
 	if err != nil {
 		return snap, err
 	}

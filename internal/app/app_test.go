@@ -695,7 +695,7 @@ func TestBuildEngramDataDirFn_CopyMoveDeleteState(t *testing.T) {
 	}
 
 	fn := buildEngramDataDirFn(home)
-	if _, err := fn(model.EngramDataDirOpCopy, src, dst); err != nil {
+	if _, err := fn(model.EngramDataDirOpCopy, src, dst, nil); err != nil {
 		t.Fatalf("copy: %v", err)
 	}
 	s, err := state.Read(home)
@@ -710,7 +710,7 @@ func TestBuildEngramDataDirFn_CopyMoveDeleteState(t *testing.T) {
 	}
 
 	dst2 := filepath.Join(home, "dst2")
-	if _, err := fn(model.EngramDataDirOpMove, dst, dst2); err != nil {
+	if _, err := fn(model.EngramDataDirOpMove, dst, dst2, nil); err != nil {
 		t.Fatalf("move: %v", err)
 	}
 	s, _ = state.Read(home)
@@ -718,12 +718,38 @@ func TestBuildEngramDataDirFn_CopyMoveDeleteState(t *testing.T) {
 		t.Fatalf("EngramDataDir after move = %q, want %q", s.EngramDataDir, filepath.Clean(dst2))
 	}
 
-	if _, err := fn(model.EngramDataDirOpDelete, dst2, ""); err != nil {
+	if _, err := fn(model.EngramDataDirOpDelete, dst2, "", nil); err != nil {
 		t.Fatalf("delete: %v", err)
 	}
 	s, _ = state.Read(home)
 	if s.EngramDataDir != "" {
 		t.Fatalf("EngramDataDir after delete = %q, want empty", s.EngramDataDir)
+	}
+}
+
+func TestBuildEngramDataDirFn_ForwardsCopyProgress(t *testing.T) {
+	home := t.TempDir()
+	src := filepath.Join(home, "src")
+	dst := filepath.Join(home, "dst")
+	content := []byte("copy progress from app wiring")
+
+	if err := os.MkdirAll(src, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(engram.DBPath(src), content, 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	var lastWritten, lastTotal int64
+	fn := buildEngramDataDirFn(home)
+	if _, err := fn(model.EngramDataDirOpCopy, src, dst, func(written, total int64) {
+		lastWritten, lastTotal = written, total
+	}); err != nil {
+		t.Fatalf("copy: %v", err)
+	}
+
+	if lastWritten != int64(len(content)) || lastTotal != int64(len(content)) {
+		t.Fatalf("progress = %d/%d, want %d/%d", lastWritten, lastTotal, len(content), len(content))
 	}
 }
 

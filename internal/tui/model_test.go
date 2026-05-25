@@ -576,6 +576,26 @@ func TestBuildProgressLabelsFromResolvedPlan(t *testing.T) {
 	}
 }
 
+func TestEngramDataDirProgressMsgUpdatesView(t *testing.T) {
+	home := t.TempDir()
+	src := filepath.Join(home, "src")
+	dst := filepath.Join(home, "dst")
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.HomeDir = home
+	m.Screen = ScreenEngramDataDirProgress
+	m.EngramDataDir = src
+	m.engramDirOp = model.EngramDataDirOpCopy
+	m.engramDirCustomPath = dst
+
+	updated, _ := m.Update(EngramDataDirProgressMsg{Op: model.EngramDataDirOpCopy, Written: 512, Total: 1024})
+	state := updated.(Model)
+	out := state.View()
+
+	if !strings.Contains(out, "50%") || !strings.Contains(out, "512 B / 1.0 KiB") {
+		t.Fatalf("progress view missing numbers; got:\n%s", out)
+	}
+}
+
 func TestBackupRestoreMsgHandledGracefully(t *testing.T) {
 	// Error case: BackupRestoreMsg with error navigates to ScreenRestoreResult
 	// and stores the error in RestoreErr.

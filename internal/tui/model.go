@@ -136,6 +136,14 @@ type EngramDataDirDoneMsg struct {
 	Err        error
 }
 
+type EngramDataDirProgressMsg struct {
+	Op      model.EngramDataDirOp
+	Written int64
+	Total   int64
+}
+
+type EngramDataDirFunc func(op model.EngramDataDirOp, currentDir, dstDir string, onProgress func(written, total int64)) (snapshotID string, err error)
+
 // UpdateCheckResultMsg is sent when the background update check completes.
 type UpdateCheckResultMsg struct {
 	Results []update.UpdateResult
@@ -292,6 +300,7 @@ const (
 	ScreenEngramDataDir
 	ScreenEngramDataDirCustomPath
 	ScreenEngramDataDirConfirm
+	ScreenEngramDataDirProgress
 	ScreenEngramDataDirResult
 )
 
@@ -477,7 +486,7 @@ type Model struct {
 	EngramDataDir       string
 	EngramDetected      bool
 	EngramKnownDataDirs []string
-	EngramDataDirFn     func(op model.EngramDataDirOp, currentDir, dstDir string) (snapshotID string, err error)
+	EngramDataDirFn     EngramDataDirFunc
 	EngramSpaceErr      string
 	engramDirLocations  []engram.Location
 	engramDirOp         model.EngramDataDirOp
@@ -485,6 +494,9 @@ type Model struct {
 	engramDirCustomPath string
 	engramDirCustomPos  int
 	engramDirDoneMsg    *EngramDataDirDoneMsg
+	engramDirRunning    bool
+	engramDirProgress   EngramDataDirProgressMsg
+	engramDirEvents     <-chan tea.Msg
 }
 
 func NewModel(detection system.DetectionResult, version string) Model {
@@ -541,7 +553,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tickCmd()
 		}
 		// Keep spinner running for operation screens.
-		if m.OperationRunning || (m.Screen == ScreenUpgrade && !m.UpdateCheckDone) ||
+		if m.OperationRunning || m.engramDirRunning || (m.Screen == ScreenUpgrade && !m.UpdateCheckDone) ||
 			(m.Screen == ScreenUpgradeSync && !m.UpdateCheckDone) {
 			m.SpinnerFrame = (m.SpinnerFrame + 1) % 10
 			return m, tickCmd()
@@ -594,6 +606,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.setScreen(ScreenOpenCodePluginResult)
 		return m, nil
 	case EngramDataDirDoneMsg:
+		m.engramDirRunning = false
+		m.engramDirEvents = nil
 		m.engramDirDoneMsg = &msg
 		if msg.Err == nil {
 			switch msg.Op {
@@ -607,6 +621,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.setScreen(ScreenEngramDataDirResult)
 		return m, nil
+	case EngramDataDirProgressMsg:
+		m.engramDirProgress = msg
+		return m, waitEngramDirEvent(m.engramDirEvents)
 	case StepProgressMsg:
 		return m.handleStepProgress(msg)
 	case PipelineDoneMsg:
@@ -667,6 +684,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.UpdateCheckDone = false
 		return m, m.Init()
 	case tea.KeyMsg:
+		if m.engramDirRunning {
+			return m, nil
+		}
 		if m.Screen == ScreenEngramDataDirCustomPath {
 			return m.handleEngramCustomPathInput(msg)
 		}
@@ -895,6 +915,9 @@ func (m Model) View() string {
 		return screens.RenderEngramDataDirCustomPath(m.engramDirOp, m.resolvedEngramDir(), m.engramDirCustomPath, m.engramDirCustomPos, m.EngramSpaceErr)
 	case ScreenEngramDataDirConfirm:
 		return screens.RenderEngramDataDirConfirm(m.engramDirOp, m.resolvedEngramDir(), m.selectedEngramDstDir(), m.engramBackupRoot(), m.Cursor)
+	case ScreenEngramDataDirProgress:
+		progress := m.engramDirProgress
+		return screens.RenderEngramDataDirProgress(m.engramDirOp, m.resolvedEngramDir(), m.selectedEngramDstDir(), progress.Written, progress.Total, screens.SpinnerChar(m.SpinnerFrame))
 	case ScreenEngramDataDirResult:
 		var done EngramDataDirDoneMsg
 		if m.engramDirDoneMsg != nil {
@@ -2110,17 +2133,7 @@ func (m Model) confirmSelection() (tea.Model, tea.Cmd) {
 			m.setScreen(ScreenEngramDataDir)
 			return m, nil
 		}
-		op := m.engramDirOp
-		currentDir := m.resolvedEngramDir()
-		dstDir := m.selectedEngramDstDir()
-		fn := m.EngramDataDirFn
-		return m, func() tea.Msg {
-			if fn == nil {
-				return EngramDataDirDoneMsg{Op: op, Err: fmt.Errorf("EngramDataDirFn not configured")}
-			}
-			snapID, err := fn(op, currentDir, dstDir)
-			return EngramDataDirDoneMsg{Op: op, SnapshotID: snapID, Err: err}
-		}
+		return m.startEngramDataDirOperation()
 	case ScreenEngramDataDirResult:
 		m.enterEngramManagement()
 		return m, nil
@@ -2905,6 +2918,8 @@ func (m Model) optionCount() int {
 		return 0
 	case ScreenEngramDataDirConfirm:
 		return 2
+	case ScreenEngramDataDirProgress:
+		return 0
 	case ScreenEngramDataDirResult:
 		return 1
 	default:
@@ -3367,6 +3382,47 @@ func (m *Model) enterEngramManagement() {
 	m.EngramSpaceErr = ""
 	m.engramDirDoneMsg = nil
 	m.setScreen(ScreenEngramDataDir)
+}
+
+func (m Model) startEngramDataDirOperation() (tea.Model, tea.Cmd) {
+	op := m.engramDirOp
+	currentDir := m.resolvedEngramDir()
+	dstDir := m.selectedEngramDstDir()
+	fn := m.EngramDataDirFn
+	events := make(chan tea.Msg, 16)
+
+	m.engramDirRunning = true
+	m.engramDirProgress = EngramDataDirProgressMsg{Op: op}
+	m.engramDirEvents = events
+	m.SpinnerFrame = 0
+	m.setScreen(ScreenEngramDataDirProgress)
+
+	go func() {
+		defer close(events)
+		if fn == nil {
+			events <- EngramDataDirDoneMsg{Op: op, Err: fmt.Errorf("EngramDataDirFn not configured")}
+			return
+		}
+		snapID, err := fn(op, currentDir, dstDir, func(written, total int64) {
+			events <- EngramDataDirProgressMsg{Op: op, Written: written, Total: total}
+		})
+		events <- EngramDataDirDoneMsg{Op: op, SnapshotID: snapID, Err: err}
+	}()
+
+	return m, tea.Batch(tickCmd(), waitEngramDirEvent(events))
+}
+
+func waitEngramDirEvent(events <-chan tea.Msg) tea.Cmd {
+	if events == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		msg, ok := <-events
+		if !ok {
+			return nil
+		}
+		return msg
+	}
 }
 
 func (m Model) selectedEngramDstDir() string {

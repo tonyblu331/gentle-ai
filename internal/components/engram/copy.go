@@ -7,10 +7,21 @@ import (
 	"path/filepath"
 )
 
+type CopyProgress struct {
+	Written int64
+	Total   int64
+}
+
+const copyProgressStepBytes = 1 << 20
+
 // CopyDB copies a quiesced Engram SQLite database from src to dst.
 // It refuses to copy when SQLite sidecar files exist because a raw file copy
 // cannot prove WAL-mode consistency for a live database.
 func CopyDB(src, dst string) error {
+	return CopyDBWithProgress(src, dst, nil)
+}
+
+func CopyDBWithProgress(src, dst string, onProgress func(CopyProgress)) error {
 	srcInfo, err := os.Stat(src)
 	if err != nil {
 		return fmt.Errorf("stat source %q: %w", src, err)
@@ -39,7 +50,9 @@ func CopyDB(src, dst string) error {
 		return fmt.Errorf("create temp file %q: %w", tmp, err)
 	}
 
-	_, copyErr := io.Copy(dstFile, srcFile)
+	progressSrc := &progressReader{r: srcFile, total: srcInfo.Size(), onProgress: onProgress}
+	progressSrc.report()
+	_, copyErr := io.Copy(dstFile, progressSrc)
 	srcCloseErr := srcFile.Close()
 	syncErr := dstFile.Sync()
 	dstCloseErr := dstFile.Close()
@@ -76,6 +89,32 @@ func CopyDB(src, dst string) error {
 		return fmt.Errorf("rename %q to %q: %w", tmp, dst, err)
 	}
 	return nil
+}
+
+type progressReader struct {
+	r          io.Reader
+	written    int64
+	total      int64
+	reported   int64
+	onProgress func(CopyProgress)
+}
+
+func (r *progressReader) Read(p []byte) (int, error) {
+	n, err := r.r.Read(p)
+	if n > 0 {
+		r.written += int64(n)
+		if r.written == r.total || r.written-r.reported >= copyProgressStepBytes {
+			r.report()
+		}
+	}
+	return n, err
+}
+
+func (r *progressReader) report() {
+	if r.onProgress != nil {
+		r.onProgress(CopyProgress{Written: r.written, Total: r.total})
+	}
+	r.reported = r.written
 }
 
 func requireQuiescedDB(src string) error {

@@ -67,3 +67,13 @@ func TestRenderEngramDataDirConfirmAndResult(t *testing.T) {
 		t.Fatal("missing error text")
 	}
 }
+
+func TestRenderEngramDataDirProgress_ShowsNumbersAndBar(t *testing.T) {
+	out := RenderEngramDataDirProgress(model.EngramDataDirOpCopy, "/src", "/dst", 512, 1024, "")
+
+	for _, want := range []string{"Copy data directory", "50%", "512 B / 1.0 KiB"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("RenderEngramDataDirProgress() missing %q; got:\n%s", want, out)
+		}
+	}
+}
