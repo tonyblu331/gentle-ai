@@ -36,6 +36,20 @@ func TestDataDirSize(t *testing.T) {
 	}
 }
 
+func TestDiskSpaceOKForDataDir_UsesOnlyEngramArtifacts(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "engram.db"), []byte("abc"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "notes.txt"), []byte("ignored"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	needed := dataDirCopySize(dir)
+	if needed != 3 {
+		t.Fatalf("dataDirCopySize = %d, want only engram.db size 3", needed)
+	}
+}
+
 func TestDiskSpaceOKForDataDir_EmptySource(t *testing.T) {
 	ok, needed, avail, err := DiskSpaceOKForDataDir(t.TempDir(), t.TempDir())
 	if err != nil {
@@ -43,5 +57,26 @@ func TestDiskSpaceOKForDataDir_EmptySource(t *testing.T) {
 	}
 	if !ok || needed != 0 || avail != 0 {
 		t.Fatalf("got ok=%v needed=%d avail=%d, want true/0/0", ok, needed, avail)
+	}
+}
+
+func TestHasEnoughSpace(t *testing.T) {
+	tests := []struct {
+		name   string
+		avail  int64
+		needed int64
+		want   bool
+	}{
+		{name: "more than needed", avail: 11, needed: 10, want: true},
+		{name: "exact fit", avail: 10, needed: 10, want: true},
+		{name: "less than needed", avail: 9, needed: 10, want: false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := hasEnoughSpace(tt.avail, tt.needed); got != tt.want {
+				t.Fatalf("hasEnoughSpace(%d, %d) = %v, want %v", tt.avail, tt.needed, got, tt.want)
+			}
+		})
 	}
 }
