@@ -158,6 +158,16 @@ func TestLoadModelsFileNotFound(t *testing.T) {
 	}
 }
 
+func TestLoadModelsOrEmptyFileNotFound(t *testing.T) {
+	providers, err := LoadModelsOrEmpty("/nonexistent/models.json")
+	if err != nil {
+		t.Fatalf("LoadModelsOrEmpty() error = %v", err)
+	}
+	if len(providers) != 0 {
+		t.Fatalf("providers = %v, want empty map", providers)
+	}
+}
+
 func withAuthFixture(t *testing.T, providers map[string]bool) func() {
 	t.Helper()
 	path := writeAuthFixture(t, providers)
@@ -635,25 +645,25 @@ func TestMergeCustomProvidersDefaultsToolCallToFalse(t *testing.T) {
 	}
 }
 
-func TestMergeCustomProvidersModelCollisionCacheWins(t *testing.T) {
+func TestMergeCustomProvidersModelCollisionCustomWins(t *testing.T) {
 	providers := map[string]Provider{
 		"lmstudio": {ID: "lmstudio", Name: "LMStudio", Models: map[string]Model{
-			"shared-model": {ID: "shared-model", Name: "Cache Name", ToolCall: true, Cost: ModelCost{Input: 5.0}},
+			"shared-model": {ID: "shared-model", Name: "Cache Name", ToolCall: false, Cost: ModelCost{Input: 5.0}},
 		}},
 	}
 	config := map[string]ConfigProvider{
 		"lmstudio": {Models: map[string]ConfigModel{
-			"shared-model": {Name: "Config Name"},
+			"shared-model": {Name: "Config Name", ToolCall: true},
 		}},
 	}
 
 	merged := MergeCustomProviders(providers, config)
 	m := merged["lmstudio"].Models["shared-model"]
-	if m.Name != "Cache Name" {
-		t.Fatalf("model name = %q, want %q (cache should win)", m.Name, "Cache Name")
+	if m.Name != "Config Name" {
+		t.Fatalf("model name = %q, want %q (custom should win)", m.Name, "Config Name")
 	}
-	if m.Cost.Input != 5.0 {
-		t.Fatal("cache cost metadata should be preserved on collision")
+	if !m.ToolCall {
+		t.Fatal("custom ToolCall=true should win over cache ToolCall=false on collision")
 	}
 }
 

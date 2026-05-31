@@ -122,12 +122,36 @@ var backupExcludeSubdirs = map[string]bool{
 // Upgrade backups are rollback artifacts for files Gentle AI may create or
 // modify, not general-purpose backups of conversations, sessions, caches,
 // sockets, package installs, or other runtime state.
+//
+// Agent scope: when state.json exists with a non-empty InstalledAgents list,
+// only those agents' config paths are backed up — this is the canonical source
+// of truth established at install time. Filesystem detection is used only as a
+// fallback for fresh installs (no state.json yet). This prevents snapshot bloat
+// from agent config dirs that the user never actually installed via gentle-ai
+// (issue #354: snapshots could reach ~25 GiB from unmanaged config dirs).
 func configPathsForBackup(homeDir string, diagnostics ...io.Writer) []string {
 	dw := firstWriter(diagnostics...)
 	reg, err := agents.NewDefaultRegistry()
 	if err != nil {
 		writeBackupDiagnostic(dw, "backup: default agent registry unavailable: %v", err)
 		return managedGlobalBackupPaths(homeDir)
+	}
+
+	// Determine the canonical agent set to back up.
+	// Priority: persisted state.json InstalledAgents > filesystem detection.
+	var managedAgentIDs []model.AgentID
+	if s, stateErr := state.Read(homeDir); stateErr == nil && len(s.InstalledAgents) > 0 {
+		managedAgentIDs = make([]model.AgentID, 0, len(s.InstalledAgents))
+		for _, id := range s.InstalledAgents {
+			managedAgentIDs = append(managedAgentIDs, model.AgentID(id))
+		}
+		writeBackupDiagnostic(dw, "backup: using state.json agent list (%d agents) as backup scope", len(managedAgentIDs))
+	} else {
+		// Fallback: filesystem detection (first-time install or missing state.json).
+		for _, installed := range agents.DiscoverInstalled(reg, homeDir) {
+			managedAgentIDs = append(managedAgentIDs, installed.ID)
+		}
+		writeBackupDiagnostic(dw, "backup: state.json unavailable, falling back to filesystem detection (%d agents)", len(managedAgentIDs))
 	}
 
 	paths := make(map[string]struct{})
@@ -143,8 +167,8 @@ func configPathsForBackup(homeDir string, diagnostics ...io.Writer) []string {
 		}
 	}
 
-	for _, installed := range agents.DiscoverInstalled(reg, homeDir) {
-		adapter, ok := reg.Get(installed.ID)
+	for _, agentID := range managedAgentIDs {
+		adapter, ok := reg.Get(agentID)
 		if !ok {
 			continue
 		}
@@ -558,13 +582,22 @@ func executeOne(ctx context.Context, r update.UpdateResult, profile system.Platf
 }
 
 // effectiveMethod resolves the actual upgrade strategy for a tool on a given platform.
-// On brew-managed platforms, brew takes precedence over the tool's declared method.
+// Priority order matches the documented install hierarchy: brew → go-install → binary.
+//
+//  1. OpenCode plugins are always handled by their own method — never overridden.
+//  2. Brew-managed platforms always use brew regardless of the tool's declared method.
+//  3. When Go is available on PATH and the tool has a GoImportPath, go-install is
+//     preferred over a direct binary download.
+//  4. Otherwise the tool's declared InstallMethod is used as-is.
 func effectiveMethod(tool update.ToolInfo, profile system.PlatformProfile) update.InstallMethod {
 	if tool.InstallMethod == update.InstallOpenCodePlugin {
 		return update.InstallOpenCodePlugin
 	}
 	if profile.PackageManager == "brew" {
 		return update.InstallBrew
+	}
+	if profile.GoAvailable && tool.GoImportPath != "" {
+		return update.InstallGoInstall
 	}
 	return tool.InstallMethod
 }

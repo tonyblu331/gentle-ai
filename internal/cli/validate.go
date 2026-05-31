@@ -11,6 +11,7 @@ import (
 
 type InstallInput struct {
 	Selection model.Selection
+	Scope     InstallScope
 	DryRun    bool
 }
 
@@ -35,7 +36,7 @@ func NormalizeInstallFlags(flags InstallFlags, detection system.DetectionResult)
 	}
 	selection.Preset = preset
 
-	components, err := normalizeComponents(flags.Components, selection.Preset)
+	components, err := normalizeComponents(flags.Components, selection.Preset, selection.Persona)
 	if err != nil {
 		return InstallInput{}, err
 	}
@@ -57,7 +58,12 @@ func NormalizeInstallFlags(flags InstallFlags, detection system.DetectionResult)
 	}
 	selection.SDDMode = sddMode
 
-	return InstallInput{Selection: selection, DryRun: flags.DryRun}, nil
+	scope, err := ResolveInstallScope(flags.Scope)
+	if err != nil {
+		return InstallInput{}, err
+	}
+
+	return InstallInput{Selection: selection, Scope: scope, DryRun: flags.DryRun}, nil
 }
 
 func normalizePersona(value string) (model.PersonaID, error) {
@@ -86,9 +92,9 @@ func normalizePreset(value string) (model.PresetID, error) {
 	}
 }
 
-func normalizeComponents(values []string, preset model.PresetID) ([]model.ComponentID, error) {
+func normalizeComponents(values []string, preset model.PresetID, persona model.PersonaID) ([]model.ComponentID, error) {
 	if len(values) == 0 {
-		return componentsForPreset(preset), nil
+		return componentsForPreset(preset, persona), nil
 	}
 
 	allowed := map[model.ComponentID]struct{}{}
@@ -143,27 +149,31 @@ func normalizeSDDMode(value string) (model.SDDModeID, error) {
 	}
 }
 
-func componentsForPreset(preset model.PresetID) []model.ComponentID {
+func componentsForPreset(preset model.PresetID, persona model.PersonaID) []model.ComponentID {
+	var components []model.ComponentID
 	switch preset {
 	case model.PresetMinimal:
-		return []model.ComponentID{model.ComponentEngram}
+		components = []model.ComponentID{model.ComponentEngram}
 	case model.PresetEcosystemOnly:
-		return []model.ComponentID{model.ComponentEngram, model.ComponentSDD, model.ComponentSkills, model.ComponentContext7, model.ComponentGGA}
+		components = []model.ComponentID{model.ComponentEngram, model.ComponentSDD, model.ComponentSkills, model.ComponentContext7, model.ComponentGGA}
 	case model.PresetCustom:
 		return nil
-	default:
-		return []model.ComponentID{
+	default: // full-gentleman
+		components = []model.ComponentID{
 			model.ComponentEngram,
 			model.ComponentSDD,
 			model.ComponentSkills,
 			model.ComponentContext7,
-			model.ComponentPersona,
 			model.ComponentPermission,
 			model.ComponentGGA,
 			model.ComponentClaudeTheme,
 			model.ComponentOpenCodeGentleLogo,
 		}
 	}
+	if persona != model.PersonaCustom {
+		components = append(components, model.ComponentPersona)
+	}
+	return components
 }
 
 func defaultAgentsFromDetection(detection system.DetectionResult) []model.AgentID {
@@ -202,6 +212,8 @@ func defaultAgentsFromDetection(detection system.DetectionResult) []model.AgentI
 			agents = append(agents, model.AgentOpenClaw)
 		case string(model.AgentPi):
 			agents = append(agents, model.AgentPi)
+		case string(model.AgentTrae):
+			agents = append(agents, model.AgentTrae)
 		}
 	}
 

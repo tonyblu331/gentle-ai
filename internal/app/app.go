@@ -107,7 +107,12 @@ func RunArgs(args []string, stdout io.Writer) error {
 			return fmt.Errorf("resolve user home directory: %w", err)
 		}
 
-		m := tui.NewModel(result, Version)
+		// Load persisted state so the TUI pre-selects the agents the user
+		// previously chose instead of re-selecting every detected config dir.
+		// A missing or unreadable state file is not an error — NewModel falls
+		// back to filesystem detection for first-time installs.
+		installedState, _ := state.Read(homeDir)
+		m := tui.NewModel(result, Version, installedState)
 		m.ExecuteFn = tuiExecute
 		m.RestoreFn = tuiRestore
 		m.DeleteBackupFn = func(manifest backup.Manifest) error {
@@ -171,6 +176,8 @@ func RunArgs(args []string, stdout io.Writer) error {
 		return nil
 	case "restore":
 		return cli.RunRestore(args[1:], stdout)
+	case "doctor":
+		return cli.RunDoctor(context.Background(), stdout)
 	default:
 		return fmt.Errorf("unknown command %q — run 'gentle-ai help' for available commands", args[0])
 	}
@@ -330,7 +337,7 @@ func tuiExecute(
 	profile := cli.ResolveInstallProfile(detection)
 	resolved.PlatformDecision = planner.PlatformDecisionFromProfile(profile)
 
-	stagePlan, err := cli.BuildRealStagePlan(homeDir, selection, resolved, profile)
+	stagePlan, err := cli.BuildRealStagePlan(homeDir, cli.ScopeGlobal, selection, resolved, profile)
 	if err != nil {
 		return pipeline.ExecutionResult{Err: fmt.Errorf("build stage plan: %w", err)}
 	}

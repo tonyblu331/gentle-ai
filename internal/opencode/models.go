@@ -94,6 +94,19 @@ func LoadModels(cachePath string) (map[string]Provider, error) {
 	return providers, nil
 }
 
+// LoadModelsOrEmpty parses the OpenCode models cache when it exists and falls
+// back to an empty provider set when OpenCode has not populated the cache yet.
+func LoadModelsOrEmpty(cachePath string) (map[string]Provider, error) {
+	providers, err := LoadModels(cachePath)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return map[string]Provider{}, nil
+		}
+		return nil, err
+	}
+	return providers, nil
+}
+
 // loadAuthProviders reads the OpenCode auth.json and returns authenticated provider IDs.
 func loadAuthProviders(authPath string) map[string]bool {
 	data, err := os.ReadFile(authPath)
@@ -294,8 +307,9 @@ func LoadConfigProviders(path string) (map[string]ConfigProvider, error) {
 
 // MergeCustomProviders merges custom providers from opencode.json into the cache-loaded
 // providers map. Custom models use the tool_call value from opencode.json, defaulting to false
-// when omitted. Cache models win on ID collision. Returns the original providers map unchanged
-// when config is empty; otherwise returns a merged copy without mutating the input.
+// when omitted. Custom entries win on ID collision (user-managed beats cached catalog).
+// Returns the original providers map unchanged when config is empty; otherwise returns a
+// merged copy without mutating the input.
 func MergeCustomProviders(providers map[string]Provider, config map[string]ConfigProvider) map[string]Provider {
 	if len(config) == 0 {
 		return providers
@@ -312,7 +326,7 @@ func MergeCustomProviders(providers map[string]Provider, config map[string]Confi
 
 	for id, cp := range config {
 		// Provider-level collision: when a provider ID already exists in the cache,
-		// we keep the cache's Name/Env and only merge in the config's models below.
+		// we keep the cache's Name/Env and merge in the config's models below.
 		// The config's provider Name is silently ignored in that case.
 		existing, ok := merged[id]
 		if !ok {
@@ -322,13 +336,12 @@ func MergeCustomProviders(providers map[string]Provider, config map[string]Confi
 			existing.Models = make(map[string]Model, len(cp.Models))
 		}
 		for mid, cm := range cp.Models {
-			if _, exists := existing.Models[mid]; !exists {
-				name := cm.Name
-				if name == "" {
-					name = mid
-				}
-				existing.Models[mid] = Model{ID: mid, Name: name, ToolCall: cm.ToolCall}
+			// Custom entry wins on model ID collision (user-managed beats cached catalog).
+			name := cm.Name
+			if name == "" {
+				name = mid
 			}
+			existing.Models[mid] = Model{ID: mid, Name: name, ToolCall: cm.ToolCall}
 		}
 		merged[id] = existing
 	}
@@ -349,4 +362,27 @@ func SDDPhases() []string {
 		"sdd-verify",
 		"sdd-archive",
 	}
+}
+
+// JDPhases returns the ordered list of judgment-day sub-agent names.
+// These are workflow-level agents (not SDD phases) used by the
+// judgment-day skill for parallel adversarial review.
+// They support independent model configuration for diversity of perspective.
+func JDPhases() []string {
+	return []string{
+		"jd-judge-a",
+		"jd-judge-b",
+		"jd-fix-agent",
+	}
+}
+
+// ConfigurableAgentPhases returns all agent names that support per-agent
+// model configuration. This includes SDD phases + JD agents.
+// Used by the inject model assignment table builder and the configurable agent set
+// in ReadCurrentModelAssignments. The TUI model picker uses SDDPhases() and
+// JDPhases() separately for row layout control.
+func ConfigurableAgentPhases() []string {
+	phases := SDDPhases()
+	phases = append(phases, JDPhases()...)
+	return phases
 }

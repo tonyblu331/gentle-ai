@@ -15,6 +15,7 @@ import (
 	"github.com/gentleman-programming/gentle-ai/internal/opencode"
 	"github.com/gentleman-programming/gentle-ai/internal/pipeline"
 	"github.com/gentleman-programming/gentle-ai/internal/planner"
+	"github.com/gentleman-programming/gentle-ai/internal/state"
 	"github.com/gentleman-programming/gentle-ai/internal/system"
 	"github.com/gentleman-programming/gentle-ai/internal/tui/screens"
 	"github.com/gentleman-programming/gentle-ai/internal/update"
@@ -239,7 +240,7 @@ func TestPiOnlyAgentContinueSkipsPromptsAndIncludesEngram(t *testing.T) {
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.Screen = ScreenAgents
 	m.Selection.Agents = []model.AgentID{model.AgentPi}
-	m.Selection.Components = componentsForPreset(model.PresetFullGentleman)
+	m.Selection.Components = componentsForPreset(model.PresetFullGentleman, model.PersonaGentleman)
 	m.Cursor = len(screensAgentOptions())
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -331,7 +332,8 @@ func TestPiCombinedWithOtherAgentsTUIInstallKeepsAllAgentsInPlan(t *testing.T) {
 	if !reflect.DeepEqual(state.DependencyPlan.Agents, wantAgents) {
 		t.Fatalf("dependency agents = %v, want %v", state.DependencyPlan.Agents, wantAgents)
 	}
-	wantComponents := []model.ComponentID{model.ComponentEngram}
+	// Minimal preset + Gentleman persona now includes ComponentPersona (persona is the source of truth).
+	wantComponents := []model.ComponentID{model.ComponentPersona, model.ComponentEngram}
 	if !reflect.DeepEqual(state.DependencyPlan.OrderedComponents, wantComponents) {
 		t.Fatalf("dependency components = %v, want %v", state.DependencyPlan.OrderedComponents, wantComponents)
 	}
@@ -738,8 +740,11 @@ func TestClaudeModelPickerBalancedSelectionStoresAssignments(t *testing.T) {
 	if state.Screen != ScreenStrictTDD {
 		t.Fatalf("screen = %v, want %v (ClaudeCode + SDD goes to StrictTDD first)", state.Screen, ScreenStrictTDD)
 	}
-	if _, exists := state.Selection.ClaudeModelAssignments["orchestrator"]; exists {
-		t.Fatalf("orchestrator should not be configurable by Claude model picker: %v", state.Selection.ClaudeModelAssignments)
+	// Orchestrator is present in the balanced preset (injected as part of the model
+	// assignment table). The Claude picker shows sub-agents and default; orchestrator
+	// is carried through for injection but is not user-editable in the picker UI.
+	if got := state.Selection.ClaudeModelAssignments["orchestrator"]; got != model.ClaudeModelOpus {
+		t.Fatalf("orchestrator = %q, want %q", got, model.ClaudeModelOpus)
 	}
 	if got := state.Selection.ClaudeModelAssignments["default"]; got != model.ClaudeModelSonnet {
 		t.Fatalf("default = %q, want %q", got, model.ClaudeModelSonnet)
@@ -763,16 +768,13 @@ func sddMultiCursor(t *testing.T) int {
 	return -1
 }
 
-// TestSDDModeMultiSkipModelPickerWhenCacheMissing verifies that when SDDModeMulti
-// is selected and the OpenCode model cache does NOT exist on disk, the TUI skips
-// the model picker and goes to ScreenStrictTDD (the new next step after SDDMode).
-// This is the "fresh install" path where OpenCode has not been run yet.
-func TestSDDModeMultiSkipModelPickerWhenCacheMissing(t *testing.T) {
-	origStat := osStatModelCache
-	osStatModelCache = func(name string) (os.FileInfo, error) {
-		return nil, os.ErrNotExist
-	}
-	t.Cleanup(func() { osStatModelCache = origStat })
+// TestSDDModeMultiShowsModelPickerWhenCacheMissing verifies that selecting
+// SDDModeMulti still opens the model picker when the OpenCode model cache has
+// not been populated yet. The picker can still load custom providers from
+// opencode.json and otherwise shows its explicit empty state instead of silently
+// skipping model assignment.
+func TestSDDModeMultiShowsModelPickerWhenCacheMissing(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
 
 	m := NewModel(system.DetectionResult{}, "dev")
 	m.Screen = ScreenSDDMode
@@ -783,12 +785,38 @@ func TestSDDModeMultiSkipModelPickerWhenCacheMissing(t *testing.T) {
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	state := updated.(Model)
 
-	// New flow: SDDMode → ScreenStrictTDD (cache missing → skip model picker, then ask strict TDD)
-	if state.Screen != ScreenStrictTDD {
-		t.Fatalf("screen = %v, want ScreenStrictTDD (cache missing → skip model picker, show strict TDD)", state.Screen)
+	if state.Screen != ScreenModelPicker {
+		t.Fatalf("screen = %v, want ScreenModelPicker (cache missing → still offer model picker)", state.Screen)
 	}
 	if len(state.ModelPicker.AvailableIDs) != 0 {
 		t.Fatalf("ModelPicker.AvailableIDs should be empty when cache missing, got: %v", state.ModelPicker.AvailableIDs)
+	}
+}
+
+func TestSDDModeMultiEmptyModelPickerCanContinueWithDefaults(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenSDDMode
+	m.Selection.Agents = []model.AgentID{model.AgentOpenCode}
+	m.Selection.Components = []model.ComponentID{model.ComponentEngram, model.ComponentSDD}
+	m.Cursor = sddMultiCursor(t)
+
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+	if state.Screen != ScreenModelPicker {
+		t.Fatalf("screen = %v, want ScreenModelPicker", state.Screen)
+	}
+
+	state.Cursor = 0 // Continue with defaults
+	updated, _ = state.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state = updated.(Model)
+
+	if state.Screen != ScreenStrictTDD {
+		t.Fatalf("screen = %v, want ScreenStrictTDD after continuing with defaults", state.Screen)
+	}
+	if state.Selection.ModelAssignments != nil {
+		t.Fatalf("ModelAssignments = %v, want nil defaults", state.Selection.ModelAssignments)
 	}
 }
 
@@ -1857,7 +1885,7 @@ func TestKiroPickerEscNonCustomWithClaudeGoesToClaudePicker(t *testing.T) {
 	m.Selection.Preset = model.PresetFullGentleman // non-custom
 	// Simulate both Kiro and Claude being selected.
 	m.Selection.Agents = []model.AgentID{model.AgentKiroIDE, model.AgentClaudeCode}
-	m.Selection.Components = componentsForPreset(model.PresetFullGentleman)
+	m.Selection.Components = componentsForPreset(model.PresetFullGentleman, model.PersonaGentleman)
 	m.KiroModelPicker = screens.NewKiroModelPickerState()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -1879,7 +1907,7 @@ func TestKiroPickerEscNonCustomWithoutClaudeGoesToPreset(t *testing.T) {
 	m.Selection.Preset = model.PresetFullGentleman
 	// Only Kiro — no Claude.
 	m.Selection.Agents = []model.AgentID{model.AgentKiroIDE}
-	m.Selection.Components = componentsForPreset(model.PresetFullGentleman)
+	m.Selection.Components = componentsForPreset(model.PresetFullGentleman, model.PersonaGentleman)
 	m.KiroModelPicker = screens.NewKiroModelPickerState()
 
 	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -2190,7 +2218,7 @@ func TestDeleteResult_EnterRefreshesAndReturnsToBackups(t *testing.T) {
 // detection-driven TUI preselection silently dropped it.
 func TestPreselectedAgents_CodexIsIncludedWhenPresent(t *testing.T) {
 	detection := makeDetectionWithAgents("codex")
-	selected := preselectedAgents(detection)
+	selected := preselectedAgents(detection, state.InstallState{})
 
 	found := false
 	for _, id := range selected {
@@ -2246,9 +2274,11 @@ func TestModelConfig_ClaudePickerTriggersSyncScreen(t *testing.T) {
 		t.Fatalf("step2: PendingSyncOverrides.ClaudeModelAssignments should be non-empty, got: %v",
 			state.PendingSyncOverrides.ClaudeModelAssignments)
 	}
-	// Balanced preset configures sub-agents/default only; Claude controls the main orchestrator model.
-	if _, exists := state.PendingSyncOverrides.ClaudeModelAssignments["orchestrator"]; exists {
-		t.Errorf("step2: orchestrator should not be configurable by Claude model picker: %v", state.PendingSyncOverrides.ClaudeModelAssignments)
+	// Orchestrator is present in the balanced preset (injected as part of the model
+	// assignment table). The Claude picker shows sub-agents and default; orchestrator
+	// is carried through for injection but is not user-editable in the picker UI.
+	if got := state.PendingSyncOverrides.ClaudeModelAssignments["orchestrator"]; got != model.ClaudeModelOpus {
+		t.Errorf("step2: orchestrator = %q, want %q", got, model.ClaudeModelOpus)
 	}
 }
 
@@ -2660,7 +2690,7 @@ func TestPreselectedAgents_AllSixAgentsMappedCorrectly(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.configAgent, func(t *testing.T) {
 			detection := makeDetectionWithAgents(tt.configAgent)
-			selected := preselectedAgents(detection)
+			selected := preselectedAgents(detection, state.InstallState{})
 
 			found := false
 			for _, id := range selected {
@@ -2679,6 +2709,113 @@ func TestPreselectedAgents_AllSixAgentsMappedCorrectly(t *testing.T) {
 					len(selected), tt.configAgent, selected)
 			}
 		})
+	}
+}
+
+// ─── agentsToManage / preselectedAgents — state wins over detection ─────────
+
+// TestAgentsToManage_StateTakesPriorityOverDetection verifies the core contract:
+// when state.json is populated, it overrides filesystem detection for TUI pre-selection.
+func TestAgentsToManage_StateTakesPriorityOverDetection(t *testing.T) {
+	tests := []struct {
+		name        string
+		stateAgents []string       // InstalledAgents from state.json
+		detectedIDs []model.AgentID // agents detected on filesystem
+		want        []model.AgentID
+		desc        string
+	}{
+		{
+			name:        "empty state falls back to filesystem detection",
+			stateAgents: nil,
+			detectedIDs: []model.AgentID{model.AgentClaudeCode, model.AgentGeminiCLI},
+			want:        []model.AgentID{model.AgentClaudeCode, model.AgentGeminiCLI},
+			desc:        "first-time install: state.json absent, filesystem detection is the source",
+		},
+		{
+			name:        "state with 2 agents wins when filesystem has 5",
+			stateAgents: []string{string(model.AgentClaudeCode), string(model.AgentOpenCode)},
+			detectedIDs: []model.AgentID{
+				model.AgentClaudeCode,
+				model.AgentOpenCode,
+				model.AgentGeminiCLI,
+				model.AgentCursor,
+				model.AgentCodex,
+			},
+			want: []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode},
+			desc: "state.json wins: only persisted agents are returned, not all 5 detected",
+		},
+		{
+			name:        "explicit empty installed_agents produces empty list",
+			stateAgents: []string{},
+			detectedIDs: []model.AgentID{model.AgentClaudeCode, model.AgentGeminiCLI},
+			want:        []model.AgentID{model.AgentClaudeCode, model.AgentGeminiCLI},
+			desc:        "empty slice in state.json is treated as no state (falls back to detection)",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			installState := state.InstallState{InstalledAgents: tt.stateAgents}
+			got := agentsToManage(installState, tt.detectedIDs)
+
+			if len(got) != len(tt.want) {
+				t.Fatalf("%s\nagentsToManage() returned %d agents, want %d\ngot:  %v\nwant: %v",
+					tt.desc, len(got), len(tt.want), got, tt.want)
+			}
+			wantSet := make(map[model.AgentID]bool, len(tt.want))
+			for _, id := range tt.want {
+				wantSet[id] = true
+			}
+			for _, id := range got {
+				if !wantSet[id] {
+					t.Errorf("%s\nagentsToManage() returned unexpected agent %q; want %v",
+						tt.desc, id, tt.want)
+				}
+			}
+		})
+	}
+}
+
+// TestPreselectedAgents_StateWinsOverDetection verifies that when a populated
+// InstallState is passed to preselectedAgents, it returns only the persisted
+// agents — not all detected config dirs.
+func TestPreselectedAgents_StateWinsOverDetection(t *testing.T) {
+	// 5 agents "detected" on filesystem.
+	detection := makeDetectionWithAgents("claude-code", "opencode", "gemini-cli", "cursor", "codex")
+
+	// state.json only lists 1 agent (the user's deliberate selection).
+	installState := state.InstallState{
+		InstalledAgents: []string{string(model.AgentClaudeCode)},
+	}
+
+	selected := preselectedAgents(detection, installState)
+
+	if len(selected) != 1 {
+		t.Fatalf("preselectedAgents() returned %d agents with populated state, want 1; got %v", len(selected), selected)
+	}
+	if selected[0] != model.AgentClaudeCode {
+		t.Errorf("preselectedAgents() returned %q, want %q", selected[0], model.AgentClaudeCode)
+	}
+}
+
+// TestNewModel_StateAgentsArePreselected verifies that NewModel uses the
+// supplied InstallState for pre-selection instead of detection.
+func TestNewModel_StateAgentsArePreselected(t *testing.T) {
+	// Filesystem: 3 agents detected.
+	detection := makeDetectionWithAgents("claude-code", "gemini-cli", "cursor")
+
+	// state.json: only 1 agent.
+	installState := state.InstallState{
+		InstalledAgents: []string{string(model.AgentGeminiCLI)},
+	}
+
+	m := NewModel(detection, "dev", installState)
+
+	if len(m.Selection.Agents) != 1 {
+		t.Fatalf("NewModel Selection.Agents = %v, want [%s]", m.Selection.Agents, model.AgentGeminiCLI)
+	}
+	if m.Selection.Agents[0] != model.AgentGeminiCLI {
+		t.Errorf("Selection.Agents[0] = %q, want %q", m.Selection.Agents[0], model.AgentGeminiCLI)
 	}
 }
 
@@ -3781,5 +3918,154 @@ func TestPinErrClearedOnScreenReentry(t *testing.T) {
 	// PinErr must be cleared on re-entry.
 	if afterReturn.PinErr != nil {
 		t.Fatalf("PinErr should be nil after returning to ScreenBackups, got: %v", afterReturn.PinErr)
+	}
+}
+
+// TestComponentsForPreset_PersonaMatrix verifies that componentsForPreset includes
+// ComponentPersona when persona != PersonaCustom and excludes it for PersonaCustom.
+func TestComponentsForPreset_PersonaMatrix(t *testing.T) {
+	tests := []struct {
+		name          string
+		preset        model.PresetID
+		persona       model.PersonaID
+		wantPersona   bool
+		wantNil       bool
+	}{
+		{
+			name:        "full-gentleman + gentleman includes persona",
+			preset:      model.PresetFullGentleman,
+			persona:     model.PersonaGentleman,
+			wantPersona: true,
+		},
+		{
+			name:        "full-gentleman + custom does not include persona",
+			preset:      model.PresetFullGentleman,
+			persona:     model.PersonaCustom,
+			wantPersona: false,
+		},
+		{
+			name:        "minimal + gentleman includes persona",
+			preset:      model.PresetMinimal,
+			persona:     model.PersonaGentleman,
+			wantPersona: true,
+		},
+		{
+			name:        "minimal + custom does not include persona",
+			preset:      model.PresetMinimal,
+			persona:     model.PersonaCustom,
+			wantPersona: false,
+		},
+		{
+			name:        "ecosystem-only + neutral includes persona",
+			preset:      model.PresetEcosystemOnly,
+			persona:     model.PersonaNeutral,
+			wantPersona: true,
+		},
+		{
+			name:        "ecosystem-only + custom does not include persona",
+			preset:      model.PresetEcosystemOnly,
+			persona:     model.PersonaCustom,
+			wantPersona: false,
+		},
+		{
+			name:    "custom preset returns nil regardless of persona (gentleman)",
+			preset:  model.PresetCustom,
+			persona: model.PersonaGentleman,
+			wantNil: true,
+		},
+		{
+			name:    "custom preset returns nil regardless of persona (custom)",
+			preset:  model.PresetCustom,
+			persona: model.PersonaCustom,
+			wantNil: true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := componentsForPreset(tt.preset, tt.persona)
+
+			if tt.wantNil {
+				if got != nil {
+					t.Fatalf("componentsForPreset(%v, %v) = %v, want nil", tt.preset, tt.persona, got)
+				}
+				return
+			}
+
+			hasPersona := false
+			for _, c := range got {
+				if c == model.ComponentPersona {
+					hasPersona = true
+					break
+				}
+			}
+
+			if tt.wantPersona && !hasPersona {
+				t.Fatalf("componentsForPreset(%v, %v) missing ComponentPersona; got: %v", tt.preset, tt.persona, got)
+			}
+			if !tt.wantPersona && hasPersona {
+				t.Fatalf("componentsForPreset(%v, %v) should not include ComponentPersona; got: %v", tt.preset, tt.persona, got)
+			}
+		})
+	}
+}
+
+// TestPersonaScreenRecomputesComponentsWhenPresetAlreadySet verifies that changing
+// the persona on the Persona screen recomputes the component list when a non-custom
+// preset has already been selected.
+func TestPersonaScreenRecomputesComponentsWhenPresetAlreadySet(t *testing.T) {
+	// Start with a model that has already picked full-gentleman preset and
+	// gentleman persona (the default), then go back to Persona screen and pick custom.
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenPersona
+	m.Selection.Preset = model.PresetFullGentleman
+	m.Selection.Persona = model.PersonaGentleman
+	m.Selection.Components = componentsForPreset(model.PresetFullGentleman, model.PersonaGentleman)
+
+	// Confirm that persona currently includes ComponentPersona.
+	hasPersonaBefore := false
+	for _, c := range m.Selection.Components {
+		if c == model.ComponentPersona {
+			hasPersonaBefore = true
+			break
+		}
+	}
+	if !hasPersonaBefore {
+		t.Fatal("setup: expected ComponentPersona in initial components")
+	}
+
+	// Move cursor to PersonaCustom (index 2) and confirm.
+	m.Cursor = 2 // PersonaOptions() = [Gentleman, Neutral, Custom]
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+
+	if state.Selection.Persona != model.PersonaCustom {
+		t.Fatalf("Persona = %v, want %v", state.Selection.Persona, model.PersonaCustom)
+	}
+
+	// ComponentPersona must be removed after recompute.
+	for _, c := range state.Selection.Components {
+		if c == model.ComponentPersona {
+			t.Fatalf("ComponentPersona must not be in components after switching to PersonaCustom; got: %v", state.Selection.Components)
+		}
+	}
+}
+
+// TestPersonaScreenDoesNotRecomputeForCustomPreset verifies that changing persona
+// does NOT recompute (and wipe) the nil component list when preset is custom.
+func TestPersonaScreenDoesNotRecomputeForCustomPreset(t *testing.T) {
+	m := NewModel(system.DetectionResult{}, "dev")
+	m.Screen = ScreenPersona
+	m.Selection.Preset = model.PresetCustom
+	m.Selection.Persona = model.PersonaGentleman
+	m.Selection.Components = nil
+
+	m.Cursor = 0 // PersonaGentleman
+	updated, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	state := updated.(Model)
+
+	// Components must remain nil for custom preset.
+	if state.Selection.Components != nil {
+		t.Fatalf("components should stay nil for custom preset; got: %v", state.Selection.Components)
 	}
 }

@@ -58,7 +58,7 @@ func TestNormalizeInstallFlagsDefaults(t *testing.T) {
 	}
 
 	want := model.Selection{
-		Agents:  []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode, model.AgentKilocode, model.AgentGeminiCLI, model.AgentCodex, model.AgentCursor, model.AgentVSCodeCopilot, model.AgentAntigravity, model.AgentWindsurf, model.AgentKimi, model.AgentQwenCode, model.AgentKiroIDE, model.AgentOpenClaw, model.AgentPi},
+		Agents:  []model.AgentID{model.AgentClaudeCode, model.AgentOpenCode, model.AgentKilocode, model.AgentGeminiCLI, model.AgentCodex, model.AgentCursor, model.AgentVSCodeCopilot, model.AgentAntigravity, model.AgentWindsurf, model.AgentKimi, model.AgentQwenCode, model.AgentKiroIDE, model.AgentOpenClaw, model.AgentPi, model.AgentTrae},
 		Persona: model.PersonaGentleman,
 		Preset:  model.PresetFullGentleman,
 		Components: []model.ComponentID{
@@ -66,11 +66,11 @@ func TestNormalizeInstallFlagsDefaults(t *testing.T) {
 			model.ComponentSDD,
 			model.ComponentSkills,
 			model.ComponentContext7,
-			model.ComponentPersona,
 			model.ComponentPermission,
 			model.ComponentGGA,
 			model.ComponentClaudeTheme,
 			model.ComponentOpenCodeGentleLogo,
+			model.ComponentPersona,
 		},
 	}
 
@@ -136,7 +136,9 @@ func TestNormalizeInstallFlagsPiOnlyRespectsExplicitPreset(t *testing.T) {
 		t.Fatalf("NormalizeInstallFlags() error = %v", err)
 	}
 
-	want := []model.ComponentID{model.ComponentEngram}
+	// Pi + explicit minimal preset with default gentleman persona now includes ComponentPersona.
+	// Persona is persona-screen-driven; preset only controls the ecosystem stack.
+	want := []model.ComponentID{model.ComponentEngram, model.ComponentPersona}
 	if !reflect.DeepEqual(input.Selection.Components, want) {
 		t.Fatalf("components = %#v, want %#v", input.Selection.Components, want)
 	}
@@ -263,7 +265,7 @@ func TestRunInstallDryRunSkipsExecution(t *testing.T) {
 func makeDetectionWithAgents(present ...string) system.DetectionResult {
 	var configs []system.ConfigState
 	// Full canonical agent set — mirrors knownAgentConfigDirs in config_scan.go.
-	known := []string{"claude-code", "opencode", "kilocode", "gemini-cli", "cursor", "vscode-copilot", "codex", "antigravity", "windsurf", "kimi", "qwen-code", "kiro-ide", "openclaw", "pi"}
+	known := []string{"claude-code", "opencode", "kilocode", "gemini-cli", "cursor", "vscode-copilot", "codex", "antigravity", "windsurf", "kimi", "qwen-code", "kiro-ide", "openclaw", "pi", "trae-ide"}
 	presentSet := make(map[string]bool, len(present))
 	for _, p := range present {
 		presentSet[p] = true
@@ -322,6 +324,7 @@ func TestDefaultAgentsFromDetection_AllAgentsMappedCorrectly(t *testing.T) {
 		{"kiro-ide", model.AgentKiroIDE},
 		{"openclaw", model.AgentOpenClaw},
 		{"pi", model.AgentPi},
+		{"trae-ide", model.AgentTrae},
 	}
 
 	for _, tt := range tests {
