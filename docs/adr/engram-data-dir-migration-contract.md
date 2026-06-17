@@ -15,10 +15,17 @@ This document preserves the proposal, decision record, issue draft, and PR-chain
 | Gentle-AI issue #346 | Closed as completed after storage/disk-space infra landed |
 | Gentle-AI PR #638 | Merged, adds cross-platform disk-space infra under `internal/storage` |
 | Gentle-AI PR #700 | Closed unmerged because it linked closed #346 |
-| Engram issue #202 | Open, asks for migration contract before approval |
-| GitHub write access from Codex connector | Blocked with 403 for both Engram comments and Gentle-AI issue creation |
+| Engram issue #202 | Replied with migration-contract summary and link to Gentle-AI #921 |
+| Gentle-AI issue #921 | Open, tracks cloud-aware data-directory migration contract |
+| GitHub write access from Codex connector | Blocked with 403; posted through local GitHub credential instead |
+| Issue labels | Not applied. Direct label mutation requires repository admin rights. |
 
-The next public action is still the same: post the Engram reply and open the Gentle-AI issue. The drafts are below so they can be posted manually if connector permissions are unavailable.
+The public design breadcrumb is now posted. Next action is to wait for maintainer review and `status:approved` on Gentle-AI #921 before reopening or replacing implementation PRs.
+
+## Posted Links
+
+- Engram #202 reply: https://github.com/Gentleman-Programming/engram/issues/202#issuecomment-4733648281
+- Gentle-AI #921: https://github.com/Gentleman-Programming/gentle-ai/issues/921
 
 ## Evidence
 
@@ -240,7 +247,9 @@ Rules:
 ## Draft Engram #202 Reply
 
 ```markdown
-Agreed. I’m going to treat this as a design gate before continuing the Gentle-AI implementation slices.
+Agreed. I’m treating this as a design gate before continuing the Gentle-AI implementation slices.
+
+I opened the focused Gentle-AI tracking issue here: https://github.com/Gentleman-Programming/gentle-ai/issues/921
 
 The proposed boundary is: Gentle-AI owns setup/TUI UX, selected `ENGRAM_DATA_DIR`, MCP env propagation, backup orchestration, destination validation, and rollback of Gentle-AI-managed state/config. Engram owns SQLite runtime semantics, `cloud.json` meaning, cloud enrollment/autosync, and any future real lock/quiesce behavior.
 
@@ -248,7 +257,7 @@ The main gap I found is cloud state. Engram stores cloud config under the active
 
 For locking, I will not claim Gentle-AI has a real runtime lock. The current safe contract is: stop Engram/MCP clients, run a before/after stability check, and fail if the data dir changes during copy. If Engram later exposes a lock/quiesce/migrate API, Gentle-AI should call that through a small backend seam instead of owning deeper store semantics.
 
-I’ll open a focused Gentle-AI issue for this remaining migration contract before reopening/replacing the implementation slice.
+I’ll wait for that issue to be reviewed/approved before reopening or replacing the implementation slice.
 ```
 
 ## Draft Gentle-AI Issue
@@ -336,15 +345,14 @@ Engram should continue to own:
 - Claiming a real lock before Engram exposes one
 ```
 
-## Blockers
+## Remaining Limitations
 
-- Codex GitHub connector returned 403 when attempting to comment on `Gentleman-Programming/engram#202`.
-- Codex GitHub connector returned 403 when attempting to create the Gentle-AI issue.
-- `gh` CLI is not installed in this environment.
+- Codex GitHub connector returned 403 for upstream issue/comment writes.
+- The issue and comment were posted through the local GitHub credential.
+- Applying labels to Gentle-AI #921 failed with `Must have admin rights to Repository`.
+- A maintainer/admin still needs to apply the normal issue labels, especially `status:needs-review` if the issue template automation did not do so.
 
-Manual fallback:
+Next workflow step:
 
-1. Post the Engram reply above on Engram #202.
-2. Create the Gentle-AI feature issue with the draft above.
-3. Wait for `status:approved`.
-4. Only then start/reopen implementation PRs.
+1. Wait for `status:approved` on Gentle-AI #921.
+2. Only then start/reopen implementation PRs.
