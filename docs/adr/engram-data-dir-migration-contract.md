@@ -17,15 +17,27 @@ This document preserves the proposal, decision record, issue draft, and PR-chain
 | Gentle-AI PR #700 | Closed unmerged because it linked closed #346 |
 | Engram issue #202 | Replied with migration-contract summary and link to Gentle-AI #921 |
 | Gentle-AI issue #921 | Open, tracks cloud-aware data-directory migration contract |
+| Gentle-AI issue #922 | Open, tracks the TUI/setup review and confirmation flow |
+| Gentle-AI issue #923 | Open, tracks the approved PR-chain implementation plan |
 | GitHub write access from Codex connector | Blocked with 403; posted through local GitHub credential instead |
-| Issue labels | Not applied. Direct label mutation requires repository admin rights. |
+| Issue labels | Not applied on #921, #922, or #923. Direct label mutation requires repository admin rights. |
 
-The public design breadcrumb is now posted. Next action is to wait for maintainer review and `status:approved` on Gentle-AI #921 before reopening or replacing implementation PRs.
+The public design breadcrumb is now split into three focused issues. Next action is to wait for maintainer review and `status:approved` before reopening or replacing implementation PRs.
 
 ## Posted Links
 
 - Engram #202 reply: https://github.com/Gentleman-Programming/engram/issues/202#issuecomment-4733648281
-- Gentle-AI #921: https://github.com/Gentleman-Programming/gentle-ai/issues/921
+- Gentle-AI #921, contract and ownership: https://github.com/Gentleman-Programming/gentle-ai/issues/921
+- Gentle-AI #922, TUI/setup flow: https://github.com/Gentleman-Programming/gentle-ai/issues/922
+- Gentle-AI #923, PR-chain implementation plan: https://github.com/Gentleman-Programming/gentle-ai/issues/923
+
+## Diagram Assets
+
+| Diagram | File |
+|---|---|
+| Migration contract and ownership | `docs/adr/assets/engram-data-dir-migration-contract.png` |
+| TUI/setup flow | `docs/adr/assets/engram-data-dir-tui-flow.png` |
+| PR-chain plan | `docs/adr/assets/engram-data-dir-pr-chain.png` |
 
 ## Evidence
 
@@ -215,11 +227,21 @@ Do not open implementation PRs until the new issue has `status:approved`.
 
 ```text
 Engram #202 design reply
-  -> new Gentle-AI issue
-  -> wait for status:approved
+  -> #921 migration contract issue
+  -> #922 TUI/setup flow issue
+  -> #923 PR-chain implementation issue
+  -> wait for maintainer approval
   -> clean replacement for #700
   -> continue slices
 ```
+
+Public issue split:
+
+| Issue | Scope | Purpose |
+|---|---|---|
+| #921 | Contract and ownership | Addresses backup, locking/stability, rollback, destination behavior, cloud boundaries, and `ENGRAM_DATA_DIR` ownership. |
+| #922 | TUI/setup flow | Addresses what the user sees before mutation, cloud-choice gating, confirmation, and result reporting. |
+| #923 | PR-chain plan | Addresses how the implementation should be split so the replacement work does not recreate #700's scope problem. |
 
 Planned implementation slices:
 
@@ -244,12 +266,16 @@ Rules:
 - split before crossing the 400-line budget
 - rebase each slice from upstream `main` before opening to avoid polluted diffs
 
-## Draft Engram #202 Reply
+## Posted Engram #202 Reply
 
 ```markdown
 Agreed. I’m treating this as a design gate before continuing the Gentle-AI implementation slices.
 
-I opened the focused Gentle-AI tracking issue here: https://github.com/Gentleman-Programming/gentle-ai/issues/921
+I split the proposal into focused Gentle-AI tracking issues so the design concerns are reviewable separately:
+
+- Contract and ownership: https://github.com/Gentleman-Programming/gentle-ai/issues/921
+- TUI/setup review flow: https://github.com/Gentleman-Programming/gentle-ai/issues/922
+- PR-chain implementation plan: https://github.com/Gentleman-Programming/gentle-ai/issues/923
 
 The proposed boundary is: Gentle-AI owns setup/TUI UX, selected `ENGRAM_DATA_DIR`, MCP env propagation, backup orchestration, destination validation, and rollback of Gentle-AI-managed state/config. Engram owns SQLite runtime semantics, `cloud.json` meaning, cloud enrollment/autosync, and any future real lock/quiesce behavior.
 
@@ -257,15 +283,15 @@ The main gap I found is cloud state. Engram stores cloud config under the active
 
 For locking, I will not claim Gentle-AI has a real runtime lock. The current safe contract is: stop Engram/MCP clients, run a before/after stability check, and fail if the data dir changes during copy. If Engram later exposes a lock/quiesce/migrate API, Gentle-AI should call that through a small backend seam instead of owning deeper store semantics.
 
-I’ll wait for that issue to be reviewed/approved before reopening or replacing the implementation slice.
+I’ll wait for the approved scope before reopening or replacing the implementation slice.
 ```
 
-## Draft Gentle-AI Issue
+## Posted #921 Contract Issue
 
 Title:
 
 ```text
-feat(engram): add cloud-aware data-directory migration contract and setup flow
+feat(engram): add cloud-aware data-directory migration contract
 ```
 
 Body:
@@ -345,14 +371,56 @@ Engram should continue to own:
 - Claiming a real lock before Engram exposes one
 ```
 
+## Posted #922 TUI Issue
+
+Title:
+
+```text
+feat(tui): add Engram data-directory review and confirmation flow
+```
+
+Purpose:
+
+- approve the user-visible setup flow before implementation
+- show the review screen fields before any filesystem mutation
+- require explicit cloud handling when cloud state is detected
+- keep TUI copy honest about Gentle-AI versus Engram ownership
+
+Image:
+
+```text
+docs/adr/assets/engram-data-dir-tui-flow.png
+```
+
+## Posted #923 PR-chain Issue
+
+Title:
+
+```text
+feat(engram): implement data-directory migration as an approved PR chain
+```
+
+Purpose:
+
+- replace the closed #700 scope with a newly approved implementation plan
+- keep each implementation PR under the 400 changed-line review budget
+- split domain helpers, preflight, service operations, MCP adapters, TUI screens, and app rollback into reviewable units
+- keep tests and docs with the behavior they verify
+
+Image:
+
+```text
+docs/adr/assets/engram-data-dir-pr-chain.png
+```
+
 ## Remaining Limitations
 
 - Codex GitHub connector returned 403 for upstream issue/comment writes.
 - The issue and comment were posted through the local GitHub credential.
-- Applying labels to Gentle-AI #921 failed with `Must have admin rights to Repository`.
-- A maintainer/admin still needs to apply the normal issue labels, especially `status:needs-review` if the issue template automation did not do so.
+- Applying labels to Gentle-AI #921, #922, and #923 failed with `Must have admin rights to Repository`.
+- A maintainer/admin still needs to apply the normal issue labels, especially `enhancement` and `status:needs-review`, if the issue template automation did not do so.
 
 Next workflow step:
 
-1. Wait for `status:approved` on Gentle-AI #921.
-2. Only then start/reopen implementation PRs.
+1. Wait for maintainer review on #921, #922, and #923.
+2. Only after the approved scope is clear, start or reopen implementation PRs.
